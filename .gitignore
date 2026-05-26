@@ -1,0 +1,16 @@
+# Entorno virtual
+venv/
+
+# Variables de entorno — NUNCA subir al repositorio
+.env
+
+# Cache de Python
+__pycache__/
+*.pyc
+*.pyo
+
+# VS Code
+.vscode/
+
+# Base de datos local
+*.db
