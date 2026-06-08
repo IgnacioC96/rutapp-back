@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+﻿from pydantic import BaseModel, field_validator
 from typing import List, Optional
 import uuid
 
@@ -27,12 +27,12 @@ class ClienteCreate(BaseModel):
     @classmethod
     def validar_direcciones(cls, direcciones):
         if len(direcciones) == 0:
-            raise ValueError("Debe tener al menos una dirección")
+            raise ValueError("Debe tener al menos una direcciÃ³n")
         if len(direcciones) > 3:
-            raise ValueError("Máximo 3 direcciones permitidas")
+            raise ValueError("MÃ¡ximo 3 direcciones permitidas")
         principales = [d for d in direcciones if d.es_principal]
         if len(principales) != 1:
-            raise ValueError("Debe haber exactamente una dirección principal")
+            raise ValueError("Debe haber exactamente una direcciÃ³n principal")
         return direcciones
 
 class ClienteUpdate(BaseModel):
