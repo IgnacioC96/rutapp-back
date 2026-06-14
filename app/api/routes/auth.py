@@ -6,7 +6,7 @@ from app.models.usuario import Usuario, RolUsuario
 from app.schemas.auth import LoginRequest, TokenResponse, UsuarioCreate, UsuarioResponse
 from app.core.security import (
     verificar_password, hashear_password,
-    crear_token, get_current_user
+    crear_token, get_current_user, require_admin
 )
 from datetime import timedelta
 from app.core.config import settings
@@ -90,7 +90,7 @@ def get_me(
 def crear_usuario(
     datos: UsuarioCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_admin)
 ):
     """
     Crea un nuevo usuario (admin o chofer).
