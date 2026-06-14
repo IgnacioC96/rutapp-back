@@ -1,4 +1,5 @@
-﻿from pydantic import BaseModel, field_validator
+﻿# -*- coding: utf-8 -*-
+from pydantic import BaseModel, field_validator
 from typing import List, Optional
 import uuid
 
@@ -8,9 +9,9 @@ class DireccionCreate(BaseModel):
     es_principal: bool = False
 
 class DireccionResponse(BaseModel):
-    id: str
+    id: uuid.UUID
     descripcion: str
-    referencia: Optional[str]
+    referencia: Optional[str] = None
     es_principal: bool
 
     class Config:
@@ -27,12 +28,12 @@ class ClienteCreate(BaseModel):
     @classmethod
     def validar_direcciones(cls, direcciones):
         if len(direcciones) == 0:
-            raise ValueError("Debe tener al menos una direcciÃ³n")
+            raise ValueError("Debe tener al menos una direccion")
         if len(direcciones) > 3:
-            raise ValueError("MÃ¡ximo 3 direcciones permitidas")
+            raise ValueError("Maximo 3 direcciones permitidas")
         principales = [d for d in direcciones if d.es_principal]
         if len(principales) != 1:
-            raise ValueError("Debe haber exactamente una direcciÃ³n principal")
+            raise ValueError("Debe haber exactamente una direccion principal")
         return direcciones
 
 class ClienteUpdate(BaseModel):
@@ -43,13 +44,13 @@ class ClienteUpdate(BaseModel):
     notas: Optional[str] = None
 
 class ClienteResponse(BaseModel):
-    id: str
+    id: uuid.UUID
     nombre: str
     telefono_whatsapp: str
-    cuit: Optional[str]
-    notas: Optional[str]
+    cuit: Optional[str] = None
+    notas: Optional[str] = None
     activo: bool
-    direcciones: List[DireccionResponse]
+    direcciones: List[DireccionResponse] = []
 
     class Config:
         from_attributes = True
