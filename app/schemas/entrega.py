@@ -1,5 +1,6 @@
-﻿from pydantic import BaseModel
-from typing import Optional
+﻿# -*- coding: utf-8 -*-
+from pydantic import BaseModel
+from typing import Optional, List
 from datetime import date, datetime
 from enum import Enum
 import uuid
@@ -28,19 +29,19 @@ class EntregaUpdate(BaseModel):
     observaciones: Optional[str] = None
 
 class EntregaResponse(BaseModel):
-    id: str
-    cliente_id: str
-    direccion_id: str
-    ruta_id: Optional[str]
+    id: uuid.UUID
+    cliente_id: uuid.UUID
+    direccion_id: uuid.UUID
+    ruta_id: Optional[uuid.UUID] = None
     descripcion: str
     bultos: int
-    peso_kg: Optional[float]
-    fecha_estimada: Optional[date]
-    observaciones: Optional[str]
-    observaciones_chofer: Optional[str]
+    peso_kg: Optional[float] = None
+    fecha_estimada: Optional[date] = None
+    observaciones: Optional[str] = None
+    observaciones_chofer: Optional[str] = None
     estado: EstadoEntrega
     creada_en: datetime
-    actualizada_en: Optional[datetime]
+    actualizada_en: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -49,4 +50,4 @@ class EntregaListResponse(BaseModel):
     total: int
     pagina: int
     por_pagina: int
-    entregas: list[EntregaResponse]
+    entregas: List[EntregaResponse]
