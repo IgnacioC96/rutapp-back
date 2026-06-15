@@ -122,3 +122,45 @@ def crear_usuario(
     db.refresh(nuevo_usuario)  # Recargar para obtener el ID generado
 
     return nuevo_usuario
+
+@router.post("/setup", response_model=UsuarioResponse, status_code=201)
+def setup_inicial(
+    datos: UsuarioCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Crea el primer usuario administrador del sistema.
+    Solo funciona si no existe ningun usuario en la base de datos.
+    Una vez que hay al menos un usuario, este endpoint queda
+    bloqueado permanentemente devolviendo 403.
+    """
+    # Verificar que no exista ningun usuario — si hay uno, el sistema
+    # ya fue inicializado y no se puede volver a usar este endpoint
+    total_usuarios = db.query(Usuario).count()
+    if total_usuarios > 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="El sistema ya fue configurado. Este endpoint esta deshabilitado."
+        )
+
+    # El primer usuario debe ser obligatoriamente admin
+    if datos.rol.value != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El primer usuario debe ser administrador"
+        )
+
+    # Crear el admin inicial con la contrasena hasheada
+    nuevo_usuario = Usuario(
+        nombre=datos.nombre,
+        email=datos.email,
+        password_hash=hashear_password(datos.password),
+        rol=RolUsuario[datos.rol.value],
+        telefono=datos.telefono,
+        activo=True
+    )
+
+    db.add(nuevo_usuario)
+    db.commit()
+    db.refresh(nuevo_usuario)
+    return nuevo_usuario
