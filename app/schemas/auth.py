@@ -1,5 +1,7 @@
 ﻿from pydantic import BaseModel, EmailStr
+from typing import Optional
 from enum import Enum
+import uuid
 
 class RolUsuario(str, Enum):
     admin = "admin"
@@ -24,11 +26,11 @@ class UsuarioCreate(BaseModel):
     telefono: str | None = None
 
 class UsuarioResponse(BaseModel):
-    id: str
+    id: uuid.UUID
     nombre: str
     email: str
     rol: str
-    telefono: str | None
+    telefono: Optional[str] = None
     activo: bool
 
     class Config:

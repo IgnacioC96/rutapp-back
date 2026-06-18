@@ -32,7 +32,6 @@ def listar_rutas(
     query = db.query(Ruta).filter(Ruta.es_plantilla == False)
 
     if current_user.get("rol") == "chofer":
-        # El chofer solo ve sus propias rutas
         query = query.filter(Ruta.chofer_id == current_user.get("sub"))
 
     rutas = query.order_by(Ruta.creada_en.desc()).all()
@@ -41,7 +40,7 @@ def listar_rutas(
         total=len(rutas),
         pagina=1,
         por_pagina=len(rutas),
-        rutas=rutas
+        rutas=[RutaResponse.from_ruta(r) for r in rutas]
     )
 
 
