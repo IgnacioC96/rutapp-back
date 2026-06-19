@@ -141,7 +141,7 @@ rutapp-back/
 
 ## Equipo
 
-**Geonexusar** — Instituto Técnico Leopoldo Marechal · PP3 · 2025
+**Geonexusar** — Instituto Técnico Leopoldo Marechal · PP3 · 2026
 
 - Ignacio Campaniello — Back-End
 - Raúl Gilmar Rodriguez — Front-End  
