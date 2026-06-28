@@ -1,5 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from typing import Optional
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.models.usuario import Usuario, RolUsuario
@@ -164,3 +165,65 @@ def setup_inicial(
     db.commit()
     db.refresh(nuevo_usuario)
     return nuevo_usuario
+
+@router.get("/usuarios", response_model=list[UsuarioResponse])
+def listar_usuarios(
+    rol: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Lista todos los usuarios del sistema.
+    Solo puede hacerlo un admin.
+    Filtro opcional por rol: ?rol=chofer o ?rol=admin
+    """
+    query = db.query(Usuario)
+
+    if rol:
+        try:
+            query = query.filter(Usuario.rol == RolUsuario[rol])
+        except KeyError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Rol '{rol}' no válido. Opciones: admin, chofer"
+            )
+
+    usuarios = query.order_by(Usuario.nombre).all()
+    return usuarios
+
+
+@router.patch("/usuarios/{usuario_id}/desactivar", response_model=UsuarioResponse)
+def desactivar_usuario(
+    usuario_id: str,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Desactiva un usuario (borrado lógico).
+    El usuario no puede desactivarse a sí mismo.
+    Solo puede hacerlo un admin.
+    """
+    # No puede desactivarse a sí mismo
+    if usuario_id == current_user["sub"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No podés desactivar tu propio usuario"
+        )
+
+    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    if not usuario:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado"
+        )
+
+    if not usuario.activo:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El usuario ya está inactivo"
+        )
+
+    usuario.activo = False
+    db.commit()
+    db.refresh(usuario)
+    return usuario
