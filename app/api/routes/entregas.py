@@ -56,7 +56,7 @@ def listar_entregas(
         total=total,
         pagina=pagina,
         por_pagina=por_pagina,
-        entregas=entregas
+        entregas=[EntregaResponse.from_entrega(e) for e in entregas]
     )
 
 
@@ -73,7 +73,7 @@ def obtener_entrega(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Entrega no encontrada"
         )
-    return entrega
+    return EntregaResponse.from_entrega(entrega)
 
 
 @router.post("", response_model=EntregaResponse, status_code=201)
@@ -121,7 +121,7 @@ def crear_entrega(
     db.add(nueva_entrega)
     db.commit()
     db.refresh(nueva_entrega)
-    return nueva_entrega
+    return EntregaResponse.from_entrega(nueva_entrega)
 
 
 @router.put("/{entrega_id}", response_model=EntregaResponse)
@@ -174,7 +174,7 @@ def editar_entrega(
 
     db.commit()
     db.refresh(entrega)
-    return entrega
+    return EntregaResponse.from_entrega(entrega)
 
 
 @router.patch("/{entrega_id}/cancelar", response_model=EntregaResponse)
@@ -202,7 +202,7 @@ def cancelar_entrega(
     entrega.estado = EstadoEntrega.cancelada
     db.commit()
     db.refresh(entrega)
-    return entrega
+    return EntregaResponse.from_entrega(entrega)
 
 
 @router.patch("/{entrega_id}/completar", response_model=EntregaResponse)
@@ -234,4 +234,4 @@ def completar_entrega(
 
     db.commit()
     db.refresh(entrega)
-    return entrega
+    return EntregaResponse.from_entrega(entrega)
