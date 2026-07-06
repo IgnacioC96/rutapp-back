@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.db.database import get_db
 from app.models.cliente import Cliente, DireccionCliente
+from app.models.entrega import Entrega
 from app.schemas.cliente import (
     ClienteCreate, ClienteUpdate,
     ClienteResponse, ClienteListResponse
@@ -141,19 +142,39 @@ def editar_cliente(
     if datos.notas is not None:
         cliente.notas = datos.notas
 
-    # Si vienen direcciones, eliminar las actuales y crear las nuevas
     if datos.direcciones is not None:
-        db.query(DireccionCliente).filter(
+        direcciones_existentes = db.query(DireccionCliente).filter(
             DireccionCliente.cliente_id == cliente_id
-        ).delete()
+        ).all()
+        ids_existentes = {str(d.id): d for d in direcciones_existentes}
+        ids_recibidos = []
+
         for dir_data in datos.direcciones:
-            nueva_dir = DireccionCliente(
-                cliente_id=cliente_id,
-                descripcion=dir_data.descripcion,
-                referencia=dir_data.referencia,
-                es_principal=dir_data.es_principal
-            )
-            db.add(nueva_dir)
+            if dir_data.id and str(dir_data.id) in ids_existentes:
+                # Actualizar dirección existente
+                dir_obj = ids_existentes[str(dir_data.id)]
+                dir_obj.descripcion = dir_data.descripcion
+                dir_obj.referencia = dir_data.referencia
+                dir_obj.es_principal = dir_data.es_principal
+                ids_recibidos.append(str(dir_data.id))
+            else:
+                # Crear dirección nueva
+                nueva_dir = DireccionCliente(
+                    cliente_id=cliente_id,
+                    descripcion=dir_data.descripcion,
+                    referencia=dir_data.referencia,
+                    es_principal=dir_data.es_principal
+                )
+                db.add(nueva_dir)
+
+        # Borrar solo las que no tienen entregas asociadas
+        for id_existente, dir_obj in ids_existentes.items():
+            if id_existente not in ids_recibidos:
+                tiene_entregas = db.query(Entrega).filter(
+                    Entrega.direccion_id == dir_obj.id
+                ).first()
+                if not tiene_entregas:
+                    db.delete(dir_obj)
 
     db.commit()
     db.refresh(cliente)

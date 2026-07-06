@@ -4,6 +4,7 @@ from typing import List, Optional
 import uuid
 
 class DireccionCreate(BaseModel):
+    id: Optional[uuid.UUID] = None
     descripcion: str
     referencia: Optional[str] = None
     es_principal: bool = False
