@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.db.database import get_db
@@ -9,11 +9,13 @@ from app.models.entrega import Entrega, EstadoEntrega
 from app.models.usuario import Usuario, RolUsuario
 from app.schemas.ruta import (
     RutaCreate, RutaAsignar, RutaUpdate,
-    RutaResponse, RutaListResponse
+    RutaResponse, RutaListResponse,
+    ConfirmarEntregaRequest, UbicacionRequest, SeguimientoResponse,
+    SeguimientoParadaResponse
 )
 from app.core.security import require_admin, get_current_user
 from app.services.optimizacion import geocodificar_direccion, optimizar_ruta
-from datetime import datetime
+from datetime import datetime, date
 import uuid
 
 router = APIRouter(prefix="/rutas", tags=["Rutas"])
@@ -21,18 +23,37 @@ router = APIRouter(prefix="/rutas", tags=["Rutas"])
 
 @router.get("", response_model=RutaListResponse)
 def listar_rutas(
+    # Sprint 3 — filtros nuevos
+    chofer_id: Optional[uuid.UUID] = Query(None),
+    solo_plantillas: Optional[bool] = Query(None),
+    fecha_programada: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Lista rutas segun el rol del usuario:
+    Lista rutas según el rol del usuario y filtros opcionales.
     - Admin: ve todas las rutas
-    - Chofer: ve solo las rutas asignadas a el
+    - Chofer: ve solo las rutas asignadas a él
+    Filtros opcionales: chofer_id, solo_plantillas, fecha_programada
     """
-    query = db.query(Ruta).filter(Ruta.es_plantilla == False)
+    query = db.query(Ruta)
 
+    # Filtrar plantillas o rutas operativas según el parámetro
+    if solo_plantillas is True:
+        query = query.filter(Ruta.es_plantilla == True)
+    elif solo_plantillas is False:
+        query = query.filter(Ruta.es_plantilla == False)
+
+    # El chofer solo ve sus rutas asignadas
     if current_user.get("rol") == "chofer":
         query = query.filter(Ruta.chofer_id == current_user.get("sub"))
+    elif chofer_id:
+        # El admin puede filtrar por chofer específico
+        query = query.filter(Ruta.chofer_id == chofer_id)
+
+    # Filtrar por fecha operativa
+    if fecha_programada:
+        query = query.filter(Ruta.fecha_programada == fecha_programada)
 
     rutas = query.order_by(Ruta.creada_en.desc()).all()
 
@@ -70,12 +91,13 @@ async def crear_ruta(
     Crea una nueva ruta optimizando el orden de las entregas.
 
     Proceso:
-    1. Verifica que todas las entregas existan y esten pendientes
+    1. Verifica que todas las entregas existan y estén pendientes
     2. Geocodifica el origen y las direcciones de cada entrega
     3. Calcula la matriz de distancias entre todos los puntos
     4. Aplica el algoritmo Nearest Neighbor para ordenar las paradas
     5. Guarda la ruta con las paradas en el orden optimizado
-    6. Cambia el estado de las entregas a "en_curso"
+    6. Guarda las coordenadas geocodificadas en cada parada
+    7. Cambia el estado de las entregas a "en_curso"
     """
     # Verificar que vengan entregas
     if not datos.entregas_ids:
@@ -84,7 +106,7 @@ async def crear_ruta(
             detail="Debe incluir al menos una entrega"
         )
 
-    # Verificar que todas las entregas existan y esten pendientes
+    # Verificar que todas las entregas existan y estén pendientes
     entregas = []
     for entrega_id in datos.entregas_ids:
         entrega = db.query(Entrega).filter(Entrega.id == entrega_id).first()
@@ -96,7 +118,7 @@ async def crear_ruta(
         if entrega.estado != EstadoEntrega.pendiente:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"La entrega {entrega_id} no esta en estado pendiente"
+                detail=f"La entrega {entrega_id} no está en estado pendiente"
             )
         entregas.append(entrega)
 
@@ -105,12 +127,12 @@ async def crear_ruta(
         # Si ya vienen coordenadas, usarlas directamente
         origen_coords = (datos.origen_longitud, datos.origen_latitud)
     elif datos.origen_descripcion:
-        # Si viene descripcion, geocodificarla
+        # Si viene descripción de texto, geocodificarla con ORS
         origen_coords = await geocodificar_direccion(datos.origen_descripcion)
         if not origen_coords:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No se pudo geocodificar la direccion de origen"
+                detail="No se pudo geocodificar la dirección de origen"
             )
     else:
         raise HTTPException(
@@ -119,7 +141,7 @@ async def crear_ruta(
         )
 
     # Geocodificar las direcciones de cada entrega en paralelo
-    # Usamos asyncio.gather para hacer todas las requests al mismo tiempo
+    # asyncio.gather ejecuta todas las requests a ORS al mismo tiempo
     tareas_geocoding = [
         geocodificar_direccion(entrega.direccion.descripcion)
         for entrega in entregas
@@ -131,32 +153,41 @@ async def crear_ruta(
         if coords is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"No se pudo geocodificar la direccion de la entrega {entregas[i].id}"
+                detail=f"No se pudo geocodificar la dirección de la entrega {entregas[i].id}"
             )
 
-    # Optimizar el orden de las paradas
-    orden_optimizado, total_km, tiempo_estimado_min = await optimizar_ruta(origen_coords, list(coords_entregas))
+    # Optimizar el orden de las paradas con Nearest Neighbor
+    orden_optimizado, total_km, tiempo_estimado_min = await optimizar_ruta(
+        origen_coords, list(coords_entregas)
+    )
 
-    # Crear la ruta en la BD
+    # Crear la ruta en la BD con los campos del Sprint 3
     nueva_ruta = Ruta(
-    nombre=datos.nombre,
-    origen_descripcion=datos.origen_descripcion,
-    origen_latitud=datos.origen_latitud,
-    origen_longitud=datos.origen_longitud,
-    es_plantilla=datos.guardar_plantilla,
-    total_km=total_km,
-    tiempo_estimado_min=tiempo_estimado_min
-)
+        nombre=datos.nombre,
+        origen_descripcion=datos.origen_descripcion,
+        origen_latitud=datos.origen_latitud,
+        origen_longitud=datos.origen_longitud,
+        es_plantilla=datos.guardar_plantilla,
+        fecha_programada=datos.fecha_programada,
+        total_km=total_km,
+        tiempo_estimado_min=tiempo_estimado_min
+        # codigo_seguimiento se genera automáticamente en el modelo
+    )
     db.add(nueva_ruta)
-    db.flush()  # Para obtener el ID sin hacer commit
+    db.flush()  # Obtener el ID sin hacer commit todavía
 
     # Crear las paradas en el orden optimizado
+    # Guardamos también las coordenadas geocodificadas para el mapa
     for orden, idx_entrega in enumerate(orden_optimizado, start=1):
         entrega = entregas[idx_entrega]
+        coords = coords_entregas[idx_entrega]  # (longitud, latitud)
         parada = ParadaRuta(
             ruta_id=nueva_ruta.id,
             entrega_id=entrega.id,
-            orden=orden
+            orden=orden,
+            # ORS devuelve (longitud, latitud) — las guardamos en el orden correcto
+            longitud=coords[0],
+            latitud=coords[1],
         )
         db.add(parada)
 
@@ -257,10 +288,10 @@ def finalizar_ruta(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Finaliza el recorrido — puede tener entregas pendientes (finalizacion de emergencia).
-    Registra el timestamp de finalizacion.
-    Si todas las entregas estan completadas, el estado es 'completada'.
-    Si quedan entregas pendientes, el estado es 'finalizada' (emergencia).
+    Finaliza el recorrido.
+    Si todas las entregas están completadas → estado 'completada'.
+    Si quedan entregas sin confirmar → estado 'finalizada' (emergencia).
+    Las entregas que quedaron en_curso vuelven a pendiente.
     """
     ruta = db.query(Ruta).filter(Ruta.id == ruta_id).first()
     if not ruta:
@@ -275,23 +306,119 @@ def finalizar_ruta(
             detail="Solo se puede finalizar una ruta en estado en curso"
         )
 
-    # Verificar cuantas entregas quedaron sin completar
-    entregas_pendientes = [
-        p for p in ruta.paradas
-        if p.entrega.estado == EstadoEntrega.en_curso
-    ]
+    # Verificar cuántas paradas quedaron sin confirmar
+    paradas_pendientes = [p for p in ruta.paradas if not p.completada]
 
-    if entregas_pendientes:
-        # Finalizacion de emergencia — quedan entregas sin completar
+    if paradas_pendientes:
+        # Finalización de emergencia — quedan entregas sin confirmar
         ruta.estado = EstadoRuta.finalizada
-        # Las entregas que quedaron en_curso vuelven a pendiente
-        for parada in entregas_pendientes:
+        # Las entregas asociadas vuelven a pendiente para ser reagendadas
+        for parada in paradas_pendientes:
             parada.entrega.estado = EstadoEntrega.pendiente
     else:
-        # Todas las entregas completadas
+        # Todas las paradas confirmadas — ruta completada exitosamente
         ruta.estado = EstadoRuta.completada
 
     ruta.finalizada_en = datetime.utcnow()
     db.commit()
     db.refresh(ruta)
     return RutaResponse.from_ruta(ruta)
+
+
+# ── Sprint 3: endpoints nuevos ────────────────────────────────────────────────
+
+@router.patch("/{ruta_id}/entregas/{entrega_id}/confirmar", response_model=RutaResponse)
+def confirmar_entrega(
+    ruta_id: uuid.UUID,
+    entrega_id: uuid.UUID,
+    datos: ConfirmarEntregaRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    El chofer confirma una entrega dentro de una ruta en curso.
+    Verifica el código QR o manual ingresado por el chofer.
+    Marca la parada como completada y la entrega como completada.
+    """
+    # Verificar que la ruta existe y está en curso
+    ruta = db.query(Ruta).filter(Ruta.id == ruta_id).first()
+    if not ruta:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ruta no encontrada"
+        )
+
+    if ruta.estado != EstadoRuta.en_curso:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se pueden confirmar entregas en rutas en curso"
+        )
+
+    # Buscar la parada correspondiente a la entrega dentro de la ruta
+    parada = db.query(ParadaRuta).filter(
+        ParadaRuta.ruta_id == ruta_id,
+        ParadaRuta.entrega_id == entrega_id
+    ).first()
+    if not parada:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Entrega no encontrada en esta ruta"
+        )
+
+    if parada.completada:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Esta entrega ya fue confirmada"
+        )
+
+    # Verificar el código — debe coincidir con los últimos 6 caracteres
+    # del ID de la entrega (código simple sin QR real por ahora)
+    codigo_esperado = str(entrega_id).replace("-", "")[:6].upper()
+    if datos.codigo.upper() != codigo_esperado:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Código incorrecto"
+        )
+
+    # Marcar la parada y la entrega como completadas
+    parada.completada = True
+    parada.entrega.estado = EstadoEntrega.completada
+
+    db.commit()
+    db.refresh(ruta)
+    return RutaResponse.from_ruta(ruta)
+
+
+@router.patch("/{ruta_id}/ubicacion")
+def actualizar_ubicacion(
+    ruta_id: uuid.UUID,
+    datos: UbicacionRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    El chofer reporta su ubicación GPS actual.
+    El front llama a este endpoint cada 15 segundos durante el recorrido.
+    La ubicación se guarda en la ruta para el seguimiento público en tiempo real.
+    """
+    ruta = db.query(Ruta).filter(Ruta.id == ruta_id).first()
+    if not ruta:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ruta no encontrada"
+        )
+
+    if ruta.estado != EstadoRuta.en_curso:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se puede reportar ubicación en rutas en curso"
+        )
+
+    # Guardar la última ubicación conocida del chofer en la ruta
+    ruta.origen_latitud = datos.latitud
+    ruta.origen_longitud = datos.longitud
+
+    db.commit()
+    return {"ok": True, "latitud": datos.latitud, "longitud": datos.longitud}
+
+

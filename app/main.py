@@ -1,7 +1,7 @@
 ﻿from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import Base, engine
-from app.api.routes import auth, clientes, entregas, rutas, usuarios
+from app.api.routes import auth, clientes, entregas, rutas, usuarios, seguimiento
 # Importar todos los modelos para que SQLAlchemy los registre
 # y cree las tablas al arrancar
 from app.models import usuario, cliente, entrega, ruta
@@ -33,6 +33,7 @@ app.include_router(clientes.router,  prefix="/api/v1", tags=["Clientes"])
 app.include_router(entregas.router,  prefix="/api/v1", tags=["Entregas"])
 app.include_router(rutas.router,     prefix="/api/v1", tags=["Rutas"])
 app.include_router(usuarios.router,  prefix="/api/v1", tags=["Usuarios"])
+app.include_router(seguimiento.router, prefix="/api/v1", tags=["Seguimiento"])
 
 @app.get("/")
 def root():

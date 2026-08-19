@@ -1,10 +1,11 @@
 ﻿import uuid
-from sqlalchemy import Column, String, Boolean, ForeignKey, Float, Integer, DateTime, Enum
+from sqlalchemy import Column, String, Boolean, ForeignKey, Float, Integer, DateTime, Enum, Date
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.database import Base
 import enum
+import secrets
 
 class EstadoRuta(enum.Enum):
     pendiente = "pendiente"
@@ -27,6 +28,11 @@ class Ruta(Base):
     total_km = Column(Float, nullable=True)
     tiempo_estimado_min = Column(Integer, nullable=True)
     es_plantilla = Column(Boolean, default=False)
+
+    # Sprint 3 — nuevos campos
+    fecha_programada = Column(Date, nullable=True)
+    codigo_seguimiento = Column(String(12), unique=True, nullable=True,
+                                default=lambda: secrets.token_urlsafe(8))
 
     creada_en = Column(DateTime(timezone=True), server_default=func.now())
     iniciada_en = Column(DateTime(timezone=True), nullable=True)
@@ -51,6 +57,11 @@ class ParadaRuta(Base):
     orden = Column(Integer, nullable=False)
     tiempo_desde_anterior_min = Column(Integer, nullable=True)
     distancia_desde_anterior_km = Column(Float, nullable=True)
+
+    # Sprint 3 — nuevos campos
+    completada = Column(Boolean, default=False)
+    latitud = Column(Float, nullable=True)
+    longitud = Column(Float, nullable=True)
 
     ruta = relationship("Ruta", back_populates="paradas")
     entrega = relationship("Entrega")
