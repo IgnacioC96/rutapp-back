@@ -1,10 +1,10 @@
 ﻿from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import Base, engine
-from app.api.routes import auth, clientes, entregas, rutas, usuarios, seguimiento
+from app.api.routes import auth, clientes, entregas, rutas, usuarios, seguimiento, vehiculos
 # Importar todos los modelos para que SQLAlchemy los registre
 # y cree las tablas al arrancar
-from app.models import usuario, cliente, entrega, ruta
+from app.models import usuario, cliente, entrega, ruta, vehiculo
 
 # Crea todas las tablas en la base de datos al arrancar la app
 # En producciÃ³n esto se reemplaza por migraciones con Alembic
@@ -34,6 +34,7 @@ app.include_router(entregas.router,  prefix="/api/v1", tags=["Entregas"])
 app.include_router(rutas.router,     prefix="/api/v1", tags=["Rutas"])
 app.include_router(usuarios.router,  prefix="/api/v1", tags=["Usuarios"])
 app.include_router(seguimiento.router, prefix="/api/v1", tags=["Seguimiento"])
+app.include_router(vehiculos.router, prefix="/api/v1", tags=["Flota"])
 
 @app.get("/")
 def root():
