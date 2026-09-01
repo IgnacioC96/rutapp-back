@@ -1,5 +1,8 @@
-﻿from fastapi import FastAPI
+﻿from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+from app.db.database import get_db
 from app.db.database import Base, engine
 from app.api.routes import auth, clientes, entregas, rutas, usuarios, seguimiento, vehiculos
 # Importar todos los modelos para que SQLAlchemy los registre
@@ -40,3 +43,25 @@ app.include_router(vehiculos.router, prefix="/api/v1", tags=["Flota"])
 def root():
     """Endpoint de verificaciÃ³n â€” confirma que el servidor estÃ¡ corriendo"""
     return {"status": "ok", "mensaje": "rutapp API corriendo"}
+
+@app.get("/health", tags=["Sistema"])
+def health_check(db: Session = Depends(get_db)):
+    """
+    Endpoint de liveness/healthcheck.
+    Verifica que el servidor está corriendo y que la base de datos responde.
+    Usado para monitoreo y balanceo de carga en producción.
+    Responde 200 si todo está OK, 503 si la BD no responde.
+    """
+    try:
+        # Ejecutar una query mínima para verificar conectividad con la BD
+        db.execute(text("SELECT 1"))
+        return {
+            "status": "ok",
+            "database": "conectada",
+            "version": "1.0.0"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Base de datos no disponible: {str(e)}"
+        )
