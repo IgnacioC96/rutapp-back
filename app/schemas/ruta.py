@@ -19,6 +19,8 @@ class ParadaResponse(BaseModel):
     Incluye datos denormalizados del cliente y dirección para
     evitar joins adicionales en el frontend.
     """
+    # ID de la parada — necesario para reordenar con drag & drop
+    id: uuid.UUID
     orden: int
     entrega_id: Optional[uuid.UUID] = None
     cliente: Optional[str] = None
@@ -47,6 +49,7 @@ class ParadaResponse(BaseModel):
         if parada.es_parada_extra:
             # Parada extra — no tiene entrega asociada
             return cls(
+                id=parada.id,
                 orden=parada.orden,
                 entrega_id=None,
                 cliente=None,
@@ -60,6 +63,7 @@ class ParadaResponse(BaseModel):
             )
         # Parada normal de entrega a cliente
         return cls(
+            id=parada.id,
             orden=parada.orden,
             entrega_id=parada.entrega_id,
             cliente=parada.entrega.cliente.nombre if parada.entrega else None,
