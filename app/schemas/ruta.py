@@ -15,19 +15,24 @@ class EstadoRuta(str, Enum):
 class ParadaResponse(BaseModel):
     """
     Representa una parada dentro de una ruta optimizada.
+    Puede ser una entrega a cliente o una parada extra operativa.
     Incluye datos denormalizados del cliente y dirección para
     evitar joins adicionales en el frontend.
     """
     orden: int
-    entrega_id: uuid.UUID
-    cliente: str
-    direccion: str
+    entrega_id: Optional[uuid.UUID] = None
+    cliente: Optional[str] = None
+    direccion: Optional[str] = None
     tiempo_desde_anterior_min: Optional[int] = None
     distancia_desde_anterior_km: Optional[float] = None
     # Sprint 3 — estado de confirmación y coordenadas para el mapa
     completada: bool = False
     latitud: Optional[float] = None
     longitud: Optional[float] = None
+    # Sprint 3 — campos para paradas extra
+    es_parada_extra: bool = False
+    descripcion_extra: Optional[str] = None
+    direccion_extra: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -35,19 +40,36 @@ class ParadaResponse(BaseModel):
     @classmethod
     def from_parada(cls, parada):
         """
-        Construye el response de una parada resolviendo
-        el nombre del cliente y la dirección desde las relaciones ORM.
+        Construye el response de una parada.
+        Si es parada extra, usa descripcion_extra y direccion_extra.
+        Si es entrega normal, resuelve cliente y dirección desde ORM.
         """
+        if parada.es_parada_extra:
+            # Parada extra — no tiene entrega asociada
+            return cls(
+                orden=parada.orden,
+                entrega_id=None,
+                cliente=None,
+                direccion=parada.direccion_extra,
+                completada=parada.completada or False,
+                latitud=parada.latitud,
+                longitud=parada.longitud,
+                es_parada_extra=True,
+                descripcion_extra=parada.descripcion_extra,
+                direccion_extra=parada.direccion_extra,
+            )
+        # Parada normal de entrega a cliente
         return cls(
             orden=parada.orden,
             entrega_id=parada.entrega_id,
-            cliente=parada.entrega.cliente.nombre,
-            direccion=parada.entrega.direccion.descripcion,
+            cliente=parada.entrega.cliente.nombre if parada.entrega else None,
+            direccion=parada.entrega.direccion.descripcion if parada.entrega else None,
             tiempo_desde_anterior_min=parada.tiempo_desde_anterior_min,
             distancia_desde_anterior_km=parada.distancia_desde_anterior_km,
             completada=parada.completada or False,
             latitud=parada.latitud,
             longitud=parada.longitud,
+            es_parada_extra=False,
         )
 
 class RutaCreate(BaseModel):
@@ -171,3 +193,36 @@ class SeguimientoResponse(BaseModel):
     progreso: int
     proxima_parada: Optional[SeguimientoParadaResponse] = None
     ultima_actualizacion: Optional[datetime] = None
+
+    # ── Sprint 3: edición manual de rutas ─────────────────────────────────────────
+
+class ParadaReordenarItem(BaseModel):
+    """
+    Item individual para reordenar paradas.
+    El front manda la lista completa con el nuevo orden deseado.
+    """
+    # ID de la parada (no de la entrega)
+    parada_id: uuid.UUID
+    # Nuevo número de orden (1 = primera parada)
+    orden: int
+
+
+class ReordenarParadasRequest(BaseModel):
+    """
+    Body para PATCH /rutas/{id}/paradas — reordenar paradas manualmente.
+    El admin arrastra las paradas en el front y manda el nuevo orden completo.
+    """
+    paradas: list[ParadaReordenarItem]
+
+
+class ParadaExtraCreate(BaseModel):
+    """
+    Body para POST /rutas/{id}/paradas/extra — agregar parada extra.
+    Las paradas extra no son entregas a clientes — son paradas operativas
+    como carga de nafta, almuerzo, parada técnica, etc.
+    """
+    descripcion: str                    # ej: "Carga de nafta YPF Morón"
+    direccion: Optional[str] = None     # dirección opcional de la parada
+    orden: Optional[int] = None         # posición deseada (al final si no se especifica)
+    latitud: Optional[float] = None     # coordenadas opcionales para el mapa
+    longitud: Optional[float] = None

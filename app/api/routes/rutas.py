@@ -11,7 +11,7 @@ from app.schemas.ruta import (
     RutaCreate, RutaAsignar, RutaUpdate,
     RutaResponse, RutaListResponse,
     ConfirmarEntregaRequest, UbicacionRequest, SeguimientoResponse,
-    SeguimientoParadaResponse
+    SeguimientoParadaResponse, ReordenarParadasRequest, ParadaExtraCreate
 )
 from app.core.security import require_admin, get_current_user
 from app.services.optimizacion import geocodificar_direccion, optimizar_ruta
@@ -421,4 +421,108 @@ def actualizar_ubicacion(
     db.commit()
     return {"ok": True, "latitud": datos.latitud, "longitud": datos.longitud}
 
+# ── Sprint 3: edición manual de rutas ────────────────────────────────────────
 
+@router.patch("/{ruta_id}/paradas", response_model=RutaResponse)
+def reordenar_paradas(
+    ruta_id: uuid.UUID,
+    datos: ReordenarParadasRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Reordena las paradas de una ruta manualmente.
+    El admin arrastra las paradas en el front y manda el nuevo orden completo.
+    Solo se puede reordenar rutas en estado pendiente o asignada.
+    """
+    ruta = db.query(Ruta).filter(Ruta.id == ruta_id).first()
+    if not ruta:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ruta no encontrada"
+        )
+
+    # Solo se puede editar si la ruta aún no fue iniciada
+    if ruta.estado not in [EstadoRuta.pendiente, EstadoRuta.asignada]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se pueden reordenar paradas en rutas pendientes o asignadas"
+        )
+
+    # Obtener todas las paradas actuales de la ruta
+    paradas_actuales = {str(p.id): p for p in ruta.paradas}
+
+    # Verificar que todos los IDs enviados pertenecen a esta ruta
+    for item in datos.paradas:
+        if str(item.parada_id) not in paradas_actuales:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"La parada {item.parada_id} no pertenece a esta ruta"
+            )
+
+    # Aplicar el nuevo orden a cada parada
+    for item in datos.paradas:
+        parada = paradas_actuales[str(item.parada_id)]
+        parada.orden = item.orden
+
+    db.commit()
+    db.refresh(ruta)
+    return RutaResponse.from_ruta(ruta)
+
+
+@router.post("/{ruta_id}/paradas/extra", response_model=RutaResponse, status_code=201)
+def agregar_parada_extra(
+    ruta_id: uuid.UUID,
+    datos: ParadaExtraCreate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Agrega una parada extra a una ruta existente.
+    Las paradas extra no son entregas a clientes — son paradas operativas
+    como carga de nafta, almuerzo, parada técnica, etc.
+    Solo se puede agregar en rutas pendientes o asignadas.
+    """
+    ruta = db.query(Ruta).filter(Ruta.id == ruta_id).first()
+    if not ruta:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ruta no encontrada"
+        )
+
+    # Solo se puede editar si la ruta aún no fue iniciada
+    if ruta.estado not in [EstadoRuta.pendiente, EstadoRuta.asignada]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se pueden agregar paradas en rutas pendientes o asignadas"
+        )
+
+    # Determinar el orden de la parada extra
+    # Si no se especifica, va al final del recorrido
+    if datos.orden is not None:
+        orden_nueva = datos.orden
+        # Desplazar las paradas existentes que tienen orden >= al nuevo
+        for parada in ruta.paradas:
+            if parada.orden >= orden_nueva:
+                parada.orden += 1
+    else:
+        # Agregar al final — orden = máximo actual + 1
+        orden_nueva = max((p.orden for p in ruta.paradas), default=0) + 1
+
+    # Crear la parada extra sin entrega_id
+    parada_extra = ParadaRuta(
+        ruta_id=ruta_id,
+        entrega_id=None,        # Las paradas extra no tienen entrega asociada
+        orden=orden_nueva,
+        es_parada_extra=True,
+        descripcion_extra=datos.descripcion,
+        direccion_extra=datos.direccion,
+        latitud=datos.latitud,
+        longitud=datos.longitud,
+        completada=False
+    )
+
+    db.add(parada_extra)
+    db.commit()
+    db.refresh(ruta)
+    return RutaResponse.from_ruta(ruta)
