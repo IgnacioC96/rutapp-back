@@ -8,6 +8,16 @@ from app.api.routes import auth, clientes, entregas, rutas, usuarios, seguimient
 # Importar todos los modelos para que SQLAlchemy los registre
 # y cree las tablas al arrancar
 from app.models import usuario, cliente, entrega, ruta, vehiculo
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import http_exception_handler as _default_http_handler
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from sqlalchemy.exc import IntegrityError
+from app.core.exceptions import (
+    validation_exception_handler,
+    integrity_error_handler,
+    generic_exception_handler,
+    http_exception_handler
+)
 
 # Crea todas las tablas en la base de datos al arrancar la app
 # En producciÃ³n esto se reemplaza por migraciones con Alembic
@@ -29,6 +39,13 @@ app.add_middleware(
     allow_methods=["*"],   # Permite GET, POST, PUT, PATCH, DELETE
     allow_headers=["*"],   # Permite todos los headers incluyendo Authorization
 )
+
+# Registro de exception handlers globales
+# Interceptan errores antes de que lleguen al cliente y los loguean
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(IntegrityError, integrity_error_handler)
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+app.add_exception_handler(Exception, generic_exception_handler)
 
 # Registro de routers â€” cada archivo de routes maneja un grupo de endpoints
 app.include_router(auth.router,      prefix="/api/v1", tags=["Auth"])
