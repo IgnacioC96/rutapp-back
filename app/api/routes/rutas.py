@@ -388,10 +388,16 @@ def confirmar_entrega(
             detail="Esta entrega ya fue confirmada"
         )
 
-    # Verificar el código — debe coincidir con los últimos 6 caracteres
-    # del ID de la entrega (código simple sin QR real por ahora)
-    codigo_esperado = str(entrega_id).replace("-", "")[:6].upper()
-    if datos.codigo.upper() != codigo_esperado:
+    # Verificar el código QR
+    # El front genera el código en formato "QR-{uuid-completo}"
+    # Se acepta tanto ese formato como los primeros 6 caracteres del UUID (código manual)
+    codigo_esperado_corto = str(entrega_id).replace("-", "")[:6].upper()
+    codigo_esperado_qr = f"QR-{str(entrega_id)}"
+
+    codigo_recibido = datos.codigo.strip()
+
+    if (codigo_recibido.upper() != codigo_esperado_corto and
+            codigo_recibido != codigo_esperado_qr):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Código incorrecto"
