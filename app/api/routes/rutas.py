@@ -140,21 +140,38 @@ async def crear_ruta(
             detail="Debe proporcionar el origen de la ruta"
         )
 
-    # Geocodificar las direcciones de cada entrega en paralelo
-    # asyncio.gather ejecuta todas las requests a ORS al mismo tiempo
-    tareas_geocoding = [
-        geocodificar_direccion(entrega.direccion.descripcion)
-        for entrega in entregas
-    ]
-    coords_entregas = await asyncio.gather(*tareas_geocoding)
+        # Obtener coordenadas de cada entrega
+    # Prioridad: coordenadas guardadas en la dirección > geocodificación con ORS
+    # Esto mejora la precisión cuando el admin ajustó el pin en el mapa de Alta Cliente
+    coords_entregas = []
+    entregas_sin_coords = []  # Índices de entregas que necesitan geocodificación
 
-    # Verificar que todas las direcciones pudieron geocodificarse
-    for i, coords in enumerate(coords_entregas):
-        if coords is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"No se pudo geocodificar la dirección de la entrega {entregas[i].id}"
-            )
+    for i, entrega in enumerate(entregas):
+        if entrega.direccion.latitud and entrega.direccion.longitud:
+            # Usar coordenadas guardadas — más precisas que geocodificar el texto
+            # ORS usa (longitud, latitud) — mismo formato que guardamos
+            coords_entregas.append((entrega.direccion.longitud, entrega.direccion.latitud))
+        else:
+            # No hay coordenadas guardadas — hay que geocodificar con ORS
+            coords_entregas.append(None)
+            entregas_sin_coords.append(i)
+
+    # Geocodificar solo las entregas que no tienen coordenadas guardadas
+    if entregas_sin_coords:
+        tareas_geocoding = [
+            geocodificar_direccion(entregas[i].direccion.descripcion)
+            for i in entregas_sin_coords
+        ]
+        resultados = await asyncio.gather(*tareas_geocoding)
+
+        # Asignar los resultados de geocodificación a las posiciones correspondientes
+        for idx, resultado in zip(entregas_sin_coords, resultados):
+            if resultado is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"No se pudo geocodificar la dirección de la entrega {entregas[idx].id}"
+                )
+            coords_entregas[idx] = resultado
 
     # Optimizar el orden de las paradas con Nearest Neighbor
     orden_optimizado, total_km, tiempo_estimado_min = await optimizar_ruta(
