@@ -324,14 +324,19 @@ def finalizar_ruta(
         )
 
     # Verificar cuántas paradas quedaron sin confirmar
-    paradas_pendientes = [p for p in ruta.paradas if not p.completada]
+    # Las paradas extra (es_parada_extra=True) no cuentan como pendientes
+    paradas_pendientes = [
+        p for p in ruta.paradas
+        if not p.completada and not p.es_parada_extra
+    ]
 
     if paradas_pendientes:
         # Finalización de emergencia — quedan entregas sin confirmar
         ruta.estado = EstadoRuta.finalizada
         # Las entregas asociadas vuelven a pendiente para ser reagendadas
         for parada in paradas_pendientes:
-            parada.entrega.estado = EstadoEntrega.pendiente
+            if parada.entrega:  # Verificar que la parada tiene entrega asociada
+                parada.entrega.estado = EstadoEntrega.pendiente
     else:
         # Todas las paradas confirmadas — ruta completada exitosamente
         ruta.estado = EstadoRuta.completada
