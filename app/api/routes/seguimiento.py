@@ -55,5 +55,8 @@ def seguimiento_publico(
         chofer_nombre=chofer_nombre,
         progreso=progreso,
         proxima_parada=proxima_parada,
-        ultima_actualizacion=ruta.finalizada_en or ruta.iniciada_en or ruta.creada_en
+        ultima_actualizacion=ruta.finalizada_en or ruta.iniciada_en or ruta.creada_en,
+        # Coordenadas actuales del chofer guardadas por PATCH /ubicacion
+        chofer_latitud=ruta.origen_latitud,
+        chofer_longitud=ruta.origen_longitud,
     )

@@ -197,6 +197,9 @@ class SeguimientoResponse(BaseModel):
     progreso: int
     proxima_parada: Optional[SeguimientoParadaResponse] = None
     ultima_actualizacion: Optional[datetime] = None
+    # Ubicación actual del chofer — se actualiza cada 15 segundos
+    chofer_latitud: Optional[float] = None
+    chofer_longitud: Optional[float] = None
 
     # ── Sprint 3: edición manual de rutas ─────────────────────────────────────────
 
