@@ -134,6 +134,7 @@ async def crear_ruta(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No se pudo geocodificar la dirección de origen"
             )
+        # Guardar las coordenadas geocodificadas del origen en la ruta
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -179,11 +180,16 @@ async def crear_ruta(
     )
 
     # Crear la ruta en la BD con los campos del Sprint 3
+
+    # Usar coordenadas del body si vienen, o las geocodificadas
+    origen_lat_final = datos.origen_latitud or (origen_coords[1] if origen_coords else None)
+    origen_lon_final = datos.origen_longitud or (origen_coords[0] if origen_coords else None)
+
     nueva_ruta = Ruta(
         nombre=datos.nombre,
         origen_descripcion=datos.origen_descripcion,
-        origen_latitud=datos.origen_latitud,
-        origen_longitud=datos.origen_longitud,
+        origen_latitud=origen_lat_final,
+        origen_longitud=origen_lon_final,
         es_plantilla=datos.guardar_plantilla,
         fecha_programada=datos.fecha_programada,
         total_km=total_km,
