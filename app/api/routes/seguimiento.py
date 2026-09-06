@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.models.ruta import Ruta, EstadoRuta
 from app.schemas.ruta import SeguimientoResponse, SeguimientoParadaResponse
+from datetime import datetime, timezone, timedelta
 
 # Router separado para evitar conflicto con /{ruta_id} en el router de rutas
 router = APIRouter(prefix="/seguimiento", tags=["Seguimiento"])
@@ -55,7 +56,7 @@ def seguimiento_publico(
         chofer_nombre=chofer_nombre,
         progreso=progreso,
         proxima_parada=proxima_parada,
-        ultima_actualizacion=ruta.finalizada_en or ruta.iniciada_en or ruta.creada_en,
+        ultima_actualizacion=datetime.now(timezone(timedelta(hours=-3))),
         # Coordenadas actuales del chofer guardadas por PATCH /ubicacion
         chofer_latitud=ruta.origen_latitud,
         chofer_longitud=ruta.origen_longitud,
