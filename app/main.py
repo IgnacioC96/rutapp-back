@@ -6,7 +6,6 @@ from app.db.database import get_db
 from app.db.database import Base, engine
 from app.api.routes import auth, clientes, entregas, rutas, usuarios, seguimiento, vehiculos
 # Importar todos los modelos para que SQLAlchemy los registre
-# y cree las tablas al arrancar
 from app.models import usuario, cliente, entrega, ruta, vehiculo
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import http_exception_handler as _default_http_handler
@@ -19,9 +18,8 @@ from app.core.exceptions import (
     http_exception_handler
 )
 
-# Crea todas las tablas en la base de datos al arrancar la app
-# En producciÃ³n esto se reemplaza por migraciones con Alembic
-Base.metadata.create_all(bind=engine)
+# El esquema de la base se gestiona con migraciones de Alembic (carpeta alembic/).
+# Ya NO se crean tablas al arrancar: ejecutar `alembic upgrade head` (ver README).
 
 app = FastAPI(
     title="rutapp API",
