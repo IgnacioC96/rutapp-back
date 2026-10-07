@@ -17,8 +17,23 @@ from app.core.security import require_admin, get_current_user
 from app.services.optimizacion import geocodificar_direccion, optimizar_ruta
 from datetime import datetime, date
 import uuid
+import hmac
 
 router = APIRouter(prefix="/rutas", tags=["Rutas"])
+
+
+def verificar_acceso_ruta(ruta: Ruta, current_user: dict) -> None:
+    """
+    Un chofer solo puede operar sobre rutas que tiene asignadas.
+    El admin tiene acceso a todas. Se usa en todos los endpoints de ruta
+    que no sean exclusivos de admin (ver, iniciar, finalizar, confirmar, ubicación).
+    """
+    if current_user.get("rol") == "chofer":
+        if ruta.chofer_id is None or str(ruta.chofer_id) != current_user.get("sub"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No tenés permiso para acceder a esta ruta"
+            )
 
 
 @router.get("", response_model=RutaListResponse)
@@ -78,6 +93,7 @@ def obtener_ruta(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Ruta no encontrada"
         )
+    verificar_acceso_ruta(ruta, current_user)
     return RutaResponse.from_ruta(ruta)
 
 
@@ -284,12 +300,7 @@ def iniciar_ruta(
         )
 
     # Verificar que es el chofer asignado quien inicia
-    if current_user.get("rol") == "chofer":
-        if str(ruta.chofer_id) != current_user.get("sub"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Solo el chofer asignado puede iniciar esta ruta"
-            )
+    verificar_acceso_ruta(ruta, current_user)
 
     if ruta.estado != EstadoRuta.asignada:
         raise HTTPException(
@@ -322,6 +333,8 @@ def finalizar_ruta(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Ruta no encontrada"
         )
+
+    verificar_acceso_ruta(ruta, current_user)
 
     if ruta.estado != EstadoRuta.en_curso:
         raise HTTPException(
@@ -376,6 +389,8 @@ def confirmar_entrega(
             detail="Ruta no encontrada"
         )
 
+    verificar_acceso_ruta(ruta, current_user)
+
     if ruta.estado != EstadoRuta.en_curso:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -399,16 +414,21 @@ def confirmar_entrega(
             detail="Esta entrega ya fue confirmada"
         )
 
-    # Verificar el código QR
-    # El front genera el código en formato "QR-{uuid-completo}"
-    # Se acepta tanto ese formato como los primeros 6 caracteres del UUID (código manual)
-    codigo_esperado_corto = str(entrega_id).replace("-", "")[:6].upper()
-    codigo_esperado_qr = f"QR-{str(entrega_id)}"
+    # Verificar el código de confirmación.
+    # Es un código aleatorio guardado en la entrega (NO derivado de su ID) que conoce
+    # el destinatario. Se acepta el código solo o con prefijo "QR-" (contenido del QR).
+    esperado = (parada.entrega.codigo_confirmacion or "").upper()
+    if not esperado:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="La entrega no tiene código de confirmación. Contactá al administrador"
+        )
 
-    codigo_recibido = datos.codigo.strip()
+    recibido = datos.codigo.strip().upper()
+    if recibido.startswith("QR-"):
+        recibido = recibido[3:]
 
-    if (codigo_recibido.upper() != codigo_esperado_corto and
-            codigo_recibido != codigo_esperado_qr):
+    if not hmac.compare_digest(recibido.encode(), esperado.encode()):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Código incorrecto"
@@ -441,6 +461,8 @@ def actualizar_ubicacion(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Ruta no encontrada"
         )
+
+    verificar_acceso_ruta(ruta, current_user)
 
     if ruta.estado != EstadoRuta.en_curso:
         raise HTTPException(

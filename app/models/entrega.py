@@ -5,12 +5,18 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.database import Base
 import enum
+import secrets
 
 class EstadoEntrega(enum.Enum):
     pendiente = "pendiente"
     en_curso = "en_curso"
     completada = "completada"
     cancelada = "cancelada"
+
+def generar_codigo_confirmacion() -> str:
+    """Código aleatorio (8 hex, ~4.300 millones de combinaciones) que el destinatario le muestra al chofer."""
+    return secrets.token_hex(4).upper()
+
 
 class Entrega(Base):
     __tablename__ = "entregas"
@@ -28,6 +34,9 @@ class Entrega(Base):
     observaciones_chofer = Column(Text, nullable=True)
 
     estado = Column(Enum(EstadoEntrega), default=EstadoEntrega.pendiente)
+
+    # Código secreto de confirmación de entrega. NO se deriva del ID. Solo lo ve el admin.
+    codigo_confirmacion = Column(String(16), nullable=True, default=generar_codigo_confirmacion)
 
     creada_en = Column(DateTime(timezone=True), server_default=func.now())
     actualizada_en = Column(DateTime(timezone=True), onupdate=func.now())
