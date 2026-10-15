@@ -98,6 +98,7 @@ def crear_cliente(
     nuevo_cliente = Cliente(
         nombre=datos.nombre,
         telefono_whatsapp=datos.telefono_whatsapp,
+        email=datos.email,
         cuit=datos.cuit,
         notas=datos.notas
     )
@@ -146,6 +147,8 @@ def editar_cliente(
         cliente.nombre = datos.nombre
     if datos.telefono_whatsapp is not None:
         cliente.telefono_whatsapp = datos.telefono_whatsapp
+    if datos.email is not None:
+        cliente.email = datos.email
     if datos.cuit is not None:
         cliente.cuit = datos.cuit
     if datos.notas is not None:

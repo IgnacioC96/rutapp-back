@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import date, datetime
 from enum import Enum
@@ -17,6 +17,9 @@ class EntregaCreate(BaseModel):
     descripcion: str
     bultos: int = 1
     peso_kg: Optional[float] = None
+    largo_cm: Optional[float] = Field(None, gt=0)
+    ancho_cm: Optional[float] = Field(None, gt=0)
+    alto_cm: Optional[float] = Field(None, gt=0)
     fecha_estimada: Optional[date] = None
     observaciones: Optional[str] = None
 
@@ -25,6 +28,9 @@ class EntregaUpdate(BaseModel):
     descripcion: Optional[str] = None
     bultos: Optional[int] = None
     peso_kg: Optional[float] = None
+    largo_cm: Optional[float] = Field(None, gt=0)
+    ancho_cm: Optional[float] = Field(None, gt=0)
+    alto_cm: Optional[float] = Field(None, gt=0)
     fecha_estimada: Optional[date] = None
     observaciones: Optional[str] = None
 
@@ -38,6 +44,9 @@ class EntregaResponse(BaseModel):
     descripcion: str
     bultos: int
     peso_kg: Optional[float] = None
+    largo_cm: Optional[float] = None
+    ancho_cm: Optional[float] = None
+    alto_cm: Optional[float] = None
     fecha_estimada: Optional[date] = None
     observaciones: Optional[str] = None
     observaciones_chofer: Optional[str] = None
@@ -62,6 +71,9 @@ class EntregaResponse(BaseModel):
             descripcion=entrega.descripcion,
             bultos=entrega.bultos,
             peso_kg=entrega.peso_kg,
+            largo_cm=entrega.largo_cm,
+            ancho_cm=entrega.ancho_cm,
+            alto_cm=entrega.alto_cm,
             fecha_estimada=entrega.fecha_estimada,
             observaciones=entrega.observaciones,
             observaciones_chofer=entrega.observaciones_chofer,

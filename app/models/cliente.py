@@ -24,6 +24,7 @@ class Cliente(Base):
     # Datos de contacto del cliente
     nombre = Column(String(150), nullable=False)
     telefono_whatsapp = Column(String(20), nullable=False)
+    email = Column(String(150), nullable=True)
     cuit = Column(String(15), nullable=True)
     notas = Column(Text, nullable=True)
 

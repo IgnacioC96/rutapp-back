@@ -3,7 +3,8 @@
 Schemas Pydantic para la gestión de clientes y sus direcciones.
 Define los contratos de entrada y salida de la API para el módulo de clientes.
 """
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, EmailStr, field_validator
+from app.core.telefono import normalizar_telefono_ar
 from typing import List, Optional
 import uuid
 
@@ -44,16 +45,36 @@ class DireccionResponse(BaseModel):
         from_attributes = True
 
 
+def _normalizar_email(valor):
+    """Vacío -> None; si viene, se guarda en minúsculas y sin espacios."""
+    if valor is None:
+        return None
+    valor = valor.strip().lower()
+    return valor or None
+
+
 class ClienteCreate(BaseModel):
     """
     Body para POST /clientes — dar de alta un cliente nuevo.
     Debe tener entre 1 y 3 direcciones, exactamente una marcada como principal.
     """
     nombre: str
+    # Se acepta en formato local (11 2345-6789) o internacional; se guarda como +549...
     telefono_whatsapp: str
+    email: Optional[EmailStr] = None
     direcciones: List[DireccionCreate]
     cuit: Optional[str] = None
     notas: Optional[str] = None
+
+    @field_validator("telefono_whatsapp")
+    @classmethod
+    def validar_telefono(cls, valor):
+        return normalizar_telefono_ar(valor)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def limpiar_email(cls, valor):
+        return _normalizar_email(valor)
 
     @field_validator("direcciones")
     @classmethod
@@ -76,9 +97,20 @@ class ClienteUpdate(BaseModel):
     """
     nombre: Optional[str] = None
     telefono_whatsapp: Optional[str] = None
+    email: Optional[EmailStr] = None
     direcciones: Optional[List[DireccionCreate]] = None
     cuit: Optional[str] = None
     notas: Optional[str] = None
+
+    @field_validator("telefono_whatsapp")
+    @classmethod
+    def validar_telefono(cls, valor):
+        return normalizar_telefono_ar(valor) if valor is not None else None
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def limpiar_email(cls, valor):
+        return _normalizar_email(valor)
 
 
 class ClienteResponse(BaseModel):
@@ -89,6 +121,7 @@ class ClienteResponse(BaseModel):
     id: uuid.UUID
     nombre: str
     telefono_whatsapp: str
+    email: Optional[str] = None
     cuit: Optional[str] = None
     notas: Optional[str] = None
     activo: bool
