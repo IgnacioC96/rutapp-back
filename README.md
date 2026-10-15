@@ -58,7 +58,31 @@ ORS_API_KEY=tu_api_key_de_openrouteservice
 CREATE DATABASE rutapp_db;
 ```
 
-2. Las tablas se crean automáticamente al levantar el servidor.
+2. Crear las tablas aplicando las migraciones de Alembic (el servidor ya no las crea solo):
+```bash
+alembic upgrade head
+```
+
+   **Si ya tenías una base creada con una versión anterior** (tablas existentes), NO corras `upgrade`: marcá la base como actualizada una sola vez con
+```bash
+alembic stamp head
+```
+
+## Migraciones (Alembic)
+
+Cada cambio en un modelo (`app/models/`) debe ir acompañado de una migración:
+
+```bash
+# 1. Modificar el modelo
+# 2. Generar la migración y REVISARLA a mano
+alembic revision --autogenerate -m "descripcion corta del cambio"
+# 3. Aplicarla
+alembic upgrade head
+```
+
+Comandos útiles: `alembic current` (versión actual), `alembic history`, `alembic downgrade -1` (deshacer la última), `alembic check` (avisa si los modelos tienen cambios sin migración).
+
+La URL de la base se toma de `DATABASE_URL` del `.env`, igual que la app.
 
 3. Crear el primer usuario admin desde el endpoint de setup (ver abajo).
 
