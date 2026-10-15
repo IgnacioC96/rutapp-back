@@ -132,6 +132,9 @@ def crear_entrega(
         descripcion=datos.descripcion,
         bultos=datos.bultos,
         peso_kg=datos.peso_kg,
+        largo_cm=datos.largo_cm,
+        ancho_cm=datos.ancho_cm,
+        alto_cm=datos.alto_cm,
         fecha_estimada=datos.fecha_estimada,
         observaciones=datos.observaciones
     )
@@ -185,6 +188,12 @@ def editar_entrega(
         entrega.bultos = datos.bultos
     if datos.peso_kg is not None:
         entrega.peso_kg = datos.peso_kg
+    if datos.largo_cm is not None:
+        entrega.largo_cm = datos.largo_cm
+    if datos.ancho_cm is not None:
+        entrega.ancho_cm = datos.ancho_cm
+    if datos.alto_cm is not None:
+        entrega.alto_cm = datos.alto_cm
     if datos.fecha_estimada is not None:
         entrega.fecha_estimada = datos.fecha_estimada
     if datos.observaciones is not None:
