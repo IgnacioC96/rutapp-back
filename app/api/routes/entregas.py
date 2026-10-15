@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import Optional
+from datetime import date, datetime, timezone, timedelta
 from app.db.database import get_db
 from app.models.entrega import Entrega, EstadoEntrega
 from app.models.cliente import Cliente, DireccionCliente
@@ -15,12 +16,45 @@ import uuid
 
 router = APIRouter(prefix="/entregas", tags=["Entregas"])
 
+# Argentina no tiene horario de verano: UTC-3 fijo (mismo criterio que seguimiento.py).
+# El servidor puede estar en UTC, así que "hoy" se calcula con esta zona y no con date.today().
+ZONA_ARGENTINA = timezone(timedelta(hours=-3))
+
+
+def _hoy_argentina() -> date:
+    return datetime.now(ZONA_ARGENTINA).date()
+
+
+def _query_entregas_visibles(db: Session, current_user: dict):
+    """
+    Base de consulta común a los listados:
+    el admin ve todas las entregas; el chofer solo las de las rutas que tiene asignadas.
+    """
+    query = db.query(Entrega)
+    if current_user.get("rol") != "admin":
+        query = query.join(Ruta, Entrega.ruta_id == Ruta.id).filter(
+            Ruta.chofer_id == uuid.UUID(current_user.get("sub"))
+        )
+    return query
+
+
+def _ordenar_entregas(query):
+    """Orden estable (necesario para paginar): primero las más próximas, sin fecha al final."""
+    return query.order_by(
+        Entrega.fecha_estimada.asc().nulls_last(),
+        Entrega.creada_en.desc(),
+        Entrega.id,
+    )
+
 
 @router.get("", response_model=EntregaListResponse)
 def listar_entregas(
     estado: Optional[str] = Query(None),
     cliente_id: Optional[uuid.UUID] = Query(None),
     search: Optional[str] = Query(None),
+    fecha_estimada: Optional[date] = Query(None, description="Solo entregas con esa fecha estimada exacta"),
+    fecha_desde: Optional[date] = Query(None, description="Fecha estimada desde (inclusive)"),
+    fecha_hasta: Optional[date] = Query(None, description="Fecha estimada hasta (inclusive)"),
     pagina: int = Query(1, ge=1),
     por_pagina: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -29,15 +63,23 @@ def listar_entregas(
     """
     Lista entregas con filtros opcionales.
     Admin ve todas, chofer ve solo las de sus rutas.
+    Filtros de fecha: fecha_estimada (exacta) o fecha_desde/fecha_hasta (rango).
+    Orden: fecha estimada más próxima primero; las que no tienen fecha, al final.
     """
     es_admin = current_user.get("rol") == "admin"
-    query = db.query(Entrega)
+    query = _query_entregas_visibles(db, current_user)
 
-    if not es_admin:
-        # El chofer solo ve las entregas de las rutas que tiene asignadas
-        query = query.join(Ruta, Entrega.ruta_id == Ruta.id).filter(
-            Ruta.chofer_id == uuid.UUID(current_user.get("sub"))
+    if fecha_desde and fecha_hasta and fecha_desde > fecha_hasta:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="fecha_desde no puede ser posterior a fecha_hasta"
         )
+    if fecha_estimada:
+        query = query.filter(Entrega.fecha_estimada == fecha_estimada)
+    if fecha_desde:
+        query = query.filter(Entrega.fecha_estimada >= fecha_desde)
+    if fecha_hasta:
+        query = query.filter(Entrega.fecha_estimada <= fecha_hasta)
 
     if estado:
         try:
@@ -58,7 +100,47 @@ def listar_entregas(
         )
 
     total = query.count()
-    entregas = query.offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+    entregas = _ordenar_entregas(query).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
+
+    return EntregaListResponse(
+        total=total,
+        pagina=pagina,
+        por_pagina=por_pagina,
+        entregas=[EntregaResponse.from_entrega(e, incluir_codigo=es_admin) for e in entregas]
+    )
+
+
+# IMPORTANTE: esta ruta va ANTES de "/{entrega_id}"; si no, FastAPI intentaría
+# interpretar "pendientes-hoy" como un UUID y respondería 422.
+@router.get("/pendientes-hoy", response_model=EntregaListResponse)
+def listar_pendientes_hoy(
+    incluir_atrasadas: bool = Query(
+        False,
+        description="Si es true, suma las pendientes con fecha estimada anterior a hoy"
+    ),
+    pagina: int = Query(1, ge=1),
+    por_pagina: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Entregas pendientes cuya fecha estimada es HOY (hora de Argentina).
+    Pensado para el dashboard del admin y para armar la ruta del día.
+    Con incluir_atrasadas=true también trae las pendientes de días anteriores
+    que quedaron sin entregar. El campo total sirve como contador del dashboard.
+    """
+    es_admin = current_user.get("rol") == "admin"
+    hoy = _hoy_argentina()
+    query = _query_entregas_visibles(db, current_user).filter(
+        Entrega.estado == EstadoEntrega.pendiente
+    )
+    if incluir_atrasadas:
+        query = query.filter(Entrega.fecha_estimada <= hoy)
+    else:
+        query = query.filter(Entrega.fecha_estimada == hoy)
+
+    total = query.count()
+    entregas = _ordenar_entregas(query).offset((pagina - 1) * por_pagina).limit(por_pagina).all()
 
     return EntregaListResponse(
         total=total,
