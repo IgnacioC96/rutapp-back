@@ -42,6 +42,8 @@ class EntregaResponse(BaseModel):
     observaciones: Optional[str] = None
     observaciones_chofer: Optional[str] = None
     estado: EstadoEntrega
+    # Solo se completa para admin; para chofer siempre viene en None
+    codigo_confirmacion: Optional[str] = None
     creada_en: datetime
     actualizada_en: Optional[datetime] = None
 
@@ -49,7 +51,7 @@ class EntregaResponse(BaseModel):
         from_attributes = True
 
     @classmethod
-    def from_entrega(cls, entrega):
+    def from_entrega(cls, entrega, incluir_codigo: bool = False):
         return cls(
             id=entrega.id,
             cliente_id=entrega.cliente_id,
@@ -64,6 +66,7 @@ class EntregaResponse(BaseModel):
             observaciones=entrega.observaciones,
             observaciones_chofer=entrega.observaciones_chofer,
             estado=entrega.estado,
+            codigo_confirmacion=entrega.codigo_confirmacion if incluir_codigo else None,
             creada_en=entrega.creada_en,
             actualizada_en=entrega.actualizada_en,
         )

@@ -5,6 +5,7 @@ from typing import Optional
 from app.db.database import get_db
 from app.models.entrega import Entrega, EstadoEntrega
 from app.models.cliente import Cliente, DireccionCliente
+from app.models.ruta import Ruta
 from app.schemas.entrega import (
     EntregaCreate, EntregaUpdate,
     EntregaResponse, EntregaListResponse
@@ -29,7 +30,14 @@ def listar_entregas(
     Lista entregas con filtros opcionales.
     Admin ve todas, chofer ve solo las de sus rutas.
     """
+    es_admin = current_user.get("rol") == "admin"
     query = db.query(Entrega)
+
+    if not es_admin:
+        # El chofer solo ve las entregas de las rutas que tiene asignadas
+        query = query.join(Ruta, Entrega.ruta_id == Ruta.id).filter(
+            Ruta.chofer_id == uuid.UUID(current_user.get("sub"))
+        )
 
     if estado:
         try:
@@ -56,7 +64,7 @@ def listar_entregas(
         total=total,
         pagina=pagina,
         por_pagina=por_pagina,
-        entregas=[EntregaResponse.from_entrega(e) for e in entregas]
+        entregas=[EntregaResponse.from_entrega(e, incluir_codigo=es_admin) for e in entregas]
     )
 
 
@@ -73,7 +81,17 @@ def obtener_entrega(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Entrega no encontrada"
         )
-    return EntregaResponse.from_entrega(entrega)
+
+    es_admin = current_user.get("rol") == "admin"
+    if not es_admin:
+        # El chofer solo puede ver entregas de rutas que tiene asignadas
+        # (404 y no 403 para no revelar que la entrega existe)
+        if not entrega.ruta or str(entrega.ruta.chofer_id) != current_user.get("sub"):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Entrega no encontrada"
+            )
+    return EntregaResponse.from_entrega(entrega, incluir_codigo=es_admin)
 
 
 @router.post("", response_model=EntregaResponse, status_code=201)
@@ -121,7 +139,7 @@ def crear_entrega(
     db.add(nueva_entrega)
     db.commit()
     db.refresh(nueva_entrega)
-    return EntregaResponse.from_entrega(nueva_entrega)
+    return EntregaResponse.from_entrega(nueva_entrega, incluir_codigo=True)
 
 
 @router.put("/{entrega_id}", response_model=EntregaResponse)
@@ -174,7 +192,7 @@ def editar_entrega(
 
     db.commit()
     db.refresh(entrega)
-    return EntregaResponse.from_entrega(entrega)
+    return EntregaResponse.from_entrega(entrega, incluir_codigo=True)
 
 
 @router.patch("/{entrega_id}/cancelar", response_model=EntregaResponse)
@@ -202,7 +220,7 @@ def cancelar_entrega(
     entrega.estado = EstadoEntrega.cancelada
     db.commit()
     db.refresh(entrega)
-    return EntregaResponse.from_entrega(entrega)
+    return EntregaResponse.from_entrega(entrega, incluir_codigo=True)
 
 
 @router.patch("/{entrega_id}/completar", response_model=EntregaResponse)
@@ -210,10 +228,12 @@ def completar_entrega(
     entrega_id: uuid.UUID,
     observaciones_chofer: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_admin)
 ):
     """
-    Marca una entrega como completada. Lo hace el chofer al confirmar con QR.
+    Cierre MANUAL de una entrega por el administrador (excepción operativa).
+    La confirmación del chofer en campo se hace SOLO con
+    PATCH /rutas/{ruta_id}/entregas/{entrega_id}/confirmar, que exige el código secreto.
     """
     entrega = db.query(Entrega).filter(Entrega.id == entrega_id).first()
     if not entrega:
@@ -234,4 +254,4 @@ def completar_entrega(
 
     db.commit()
     db.refresh(entrega)
-    return EntregaResponse.from_entrega(entrega)
+    return EntregaResponse.from_entrega(entrega, incluir_codigo=True)
