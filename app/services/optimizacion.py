@@ -5,6 +5,13 @@ from app.core.config import settings
 # URL base de la API de OpenRouteService
 ORS_BASE_URL = "https://api.openrouteservice.org"
 
+# Tiempo máximo de espera por pedido al servicio de mapas (segundos)
+ORS_TIMEOUT = 20.0
+
+
+class ServicioMapasError(Exception):
+    """El servicio externo de mapas (OpenRouteService) falló o no respondió bien."""
+
 
 async def geocodificar_direccion(direccion: str) -> tuple[float, float] | None:
     """
@@ -12,17 +19,24 @@ async def geocodificar_direccion(direccion: str) -> tuple[float, float] | None:
     Usa la API de geocodificacion de OpenRouteService.
     Devuelve una tupla (longitud, latitud) o None si no encuentra la direccion.
     """
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"{ORS_BASE_URL}/geocode/search",
-            params={
-                "api_key": settings.ORS_API_KEY,
-                "text": f"{direccion}, Argentina",
-                "size": 1,                    # Solo queremos el resultado mas relevante
-                "boundary.country": "AR",     # Limitamos a Argentina
-            }
-        )
+    try:
+        async with httpx.AsyncClient(timeout=ORS_TIMEOUT) as client:
+            response = await client.get(
+                f"{ORS_BASE_URL}/geocode/search",
+                params={
+                    "api_key": settings.ORS_API_KEY,
+                    "text": f"{direccion}, Argentina",
+                    "size": 1,                    # Solo queremos el resultado mas relevante
+                    "boundary.country": "AR",     # Limitamos a Argentina
+                }
+            )
+        if response.status_code != 200:
+            raise ServicioMapasError(f"geocodificación respondió {response.status_code}")
         data = response.json()
+    except httpx.HTTPError as exc:
+        raise ServicioMapasError(f"geocodificación no disponible: {exc}") from exc
+    except ValueError as exc:
+        raise ServicioMapasError("geocodificación devolvió una respuesta ilegible") from exc
 
         # La API devuelve una lista de features GeoJSON
         if not data.get("features"):
@@ -39,21 +53,28 @@ async def calcular_matriz_distancias(coordenadas: list[tuple[float, float]]) -> 
     Recibe una lista de coordenadas (longitud, latitud).
     Devuelve una matriz NxN con los tiempos en segundos entre cada par de puntos.
     """
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{ORS_BASE_URL}/v2/matrix/driving-car",
-            headers={
-                "Authorization": settings.ORS_API_KEY,
-                "Content-Type": "application/json"
-            },
-            json={
-                "locations": [[lon, lat] for lon, lat in coordenadas],
-                "metrics": ["duration", "distance"],  # Tiempo y distancia
-                "units": "km"
-            }
-        )
+    try:
+        async with httpx.AsyncClient(timeout=ORS_TIMEOUT) as client:
+            response = await client.post(
+                f"{ORS_BASE_URL}/v2/matrix/driving-car",
+                headers={
+                    "Authorization": settings.ORS_API_KEY,
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "locations": [[lon, lat] for lon, lat in coordenadas],
+                    "metrics": ["duration", "distance"],  # Tiempo y distancia
+                    "units": "km"
+                }
+            )
         data = response.json()
-        return data["durations"], data["distances"]
+    except httpx.HTTPError as exc:
+        raise ServicioMapasError(f"matriz de distancias no disponible: {exc}") from exc
+    except ValueError as exc:
+        raise ServicioMapasError("matriz de distancias devolvió una respuesta ilegible") from exc
+    if response.status_code != 200 or "durations" not in data or "distances" not in data:
+        raise ServicioMapasError(f"matriz de distancias respondió {response.status_code}: {str(data)[:200]}")
+    return data["durations"], data["distances"]
 
 
 def algoritmo_nearest_neighbor(

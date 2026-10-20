@@ -11,10 +11,12 @@ from app.schemas.ruta import (
     RutaCreate, RutaAsignar, RutaUpdate,
     RutaResponse, RutaListResponse,
     ConfirmarEntregaRequest, UbicacionRequest, SeguimientoResponse,
-    SeguimientoParadaResponse, ReordenarParadasRequest, ParadaExtraCreate
+    SeguimientoParadaResponse, ReordenarParadasRequest, ParadaExtraCreate,
+    ParadaExtraUpdate
 )
 from app.core.security import require_admin, get_current_user
-from app.services.optimizacion import geocodificar_direccion, optimizar_ruta
+from app.services.optimizacion import geocodificar_direccion, optimizar_ruta, ServicioMapasError
+from app.core.exceptions import logger
 from datetime import datetime, date
 import uuid
 import hmac
@@ -34,6 +36,19 @@ def verificar_acceso_ruta(ruta: Ruta, current_user: dict) -> None:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="No tenés permiso para acceder a esta ruta"
             )
+
+
+def _error_servicio_mapas(exc: Exception) -> HTTPException:
+    """503 con un mensaje claro cuando falla el servicio externo de mapas.
+    No se modificó nada en la base: se puede reintentar sin problema."""
+    logger.error(f"Servicio de mapas no disponible: {exc}")
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=(
+            "No se pudo calcular la ruta porque el servicio de mapas no respondió. "
+            "No se guardó nada: probá de nuevo en unos minutos"
+        )
+    )
 
 
 @router.get("", response_model=RutaListResponse)
@@ -119,7 +134,14 @@ async def crear_ruta(
     if not datos.entregas_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Debe incluir al menos una entrega"
+            detail="Seleccioná al menos una entrega para planificar la ruta"
+        )
+
+    # Una misma entrega no puede estar dos veces en la ruta
+    if len(set(datos.entregas_ids)) != len(datos.entregas_ids):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Hay entregas repetidas en la selección"
         )
 
     # Verificar que todas las entregas existan y estén pendientes
@@ -129,12 +151,15 @@ async def crear_ruta(
         if not entrega:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Entrega {entrega_id} no encontrada"
+                detail="Una de las entregas seleccionadas ya no existe. Actualizá la lista e intentá de nuevo"
             )
         if entrega.estado != EstadoEntrega.pendiente:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"La entrega {entrega_id} no está en estado pendiente"
+                detail=(
+                    f"La entrega de {entrega.cliente.nombre} no está pendiente "
+                    f"(estado actual: {entrega.estado.value}). Quitala de la selección"
+                )
             )
         entregas.append(entrega)
 
@@ -144,7 +169,10 @@ async def crear_ruta(
         origen_coords = (datos.origen_longitud, datos.origen_latitud)
     elif datos.origen_descripcion:
         # Si viene descripción de texto, geocodificarla con ORS
-        origen_coords = await geocodificar_direccion(datos.origen_descripcion)
+        try:
+            origen_coords = await geocodificar_direccion(datos.origen_descripcion)
+        except ServicioMapasError as exc:
+            raise _error_servicio_mapas(exc)
         if not origen_coords:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -179,21 +207,31 @@ async def crear_ruta(
             geocodificar_direccion(entregas[i].direccion.descripcion)
             for i in entregas_sin_coords
         ]
-        resultados = await asyncio.gather(*tareas_geocoding)
+        try:
+            resultados = await asyncio.gather(*tareas_geocoding)
+        except ServicioMapasError as exc:
+            raise _error_servicio_mapas(exc)
 
         # Asignar los resultados de geocodificación a las posiciones correspondientes
         for idx, resultado in zip(entregas_sin_coords, resultados):
             if resultado is None:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"No se pudo geocodificar la dirección de la entrega {entregas[idx].id}"
+                    detail=(
+                        f"No se pudo ubicar en el mapa la dirección de la entrega de "
+                        f"{entregas[idx].cliente.nombre} ({entregas[idx].direccion.descripcion}). "
+                        f"Corregí la dirección o ajustá el pin del cliente"
+                    )
                 )
             coords_entregas[idx] = resultado
 
     # Optimizar el orden de las paradas con Nearest Neighbor
-    orden_optimizado, total_km, tiempo_estimado_min = await optimizar_ruta(
-        origen_coords, list(coords_entregas)
-    )
+    try:
+        orden_optimizado, total_km, tiempo_estimado_min = await optimizar_ruta(
+            origen_coords, list(coords_entregas)
+        )
+    except ServicioMapasError as exc:
+        raise _error_servicio_mapas(exc)
 
     # Crear la ruta en la BD con los campos del Sprint 3
 
@@ -516,6 +554,23 @@ def reordenar_paradas(
                 detail=f"La parada {item.parada_id} no pertenece a esta ruta"
             )
 
+    ids_enviados = [str(i.parada_id) for i in datos.paradas]
+    if len(set(ids_enviados)) != len(ids_enviados):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Hay paradas repetidas en el nuevo orden"
+        )
+
+    # Calcular cómo quedaría el orden de TODAS las paradas y verificar que no se repita
+    nuevo_orden = {str(p.id): p.orden for p in ruta.paradas}
+    for item in datos.paradas:
+        nuevo_orden[str(item.parada_id)] = item.orden
+    if any(o < 1 for o in nuevo_orden.values()) or len(set(nuevo_orden.values())) != len(nuevo_orden):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El nuevo orden es inválido: cada parada necesita una posición distinta, empezando en 1"
+        )
+
     # Aplicar el nuevo orden a cada parada
     for item in datos.paradas:
         parada = paradas_actuales[str(item.parada_id)]
@@ -555,15 +610,17 @@ def agregar_parada_extra(
 
     # Determinar el orden de la parada extra
     # Si no se especifica, va al final del recorrido
+    max_orden = max((p.orden for p in ruta.paradas), default=0)
     if datos.orden is not None:
-        orden_nueva = datos.orden
+        # Si piden una posición más allá del final, va al final
+        orden_nueva = min(datos.orden, max_orden + 1)
         # Desplazar las paradas existentes que tienen orden >= al nuevo
         for parada in ruta.paradas:
             if parada.orden >= orden_nueva:
                 parada.orden += 1
     else:
         # Agregar al final — orden = máximo actual + 1
-        orden_nueva = max((p.orden for p in ruta.paradas), default=0) + 1
+        orden_nueva = max_orden + 1
 
     # Crear la parada extra sin entrega_id
     parada_extra = ParadaRuta(
@@ -579,6 +636,93 @@ def agregar_parada_extra(
     )
 
     db.add(parada_extra)
+    db.commit()
+    db.refresh(ruta)
+    return RutaResponse.from_ruta(ruta)
+
+
+def _obtener_parada_extra_editable(db: Session, ruta_id: uuid.UUID, parada_id: uuid.UUID):
+    """Devuelve (ruta, parada) si la parada es extra y la ruta todavía se puede editar."""
+    ruta = db.query(Ruta).filter(Ruta.id == ruta_id).first()
+    if not ruta:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ruta no encontrada")
+    if ruta.estado not in [EstadoRuta.pendiente, EstadoRuta.asignada]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se pueden modificar paradas en rutas pendientes o asignadas"
+        )
+    parada = next((p for p in ruta.paradas if p.id == parada_id), None)
+    if not parada:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="La parada no pertenece a esta ruta")
+    if not parada.es_parada_extra:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se pueden modificar o eliminar paradas extra, no las entregas"
+        )
+    return ruta, parada
+
+
+@router.patch("/{ruta_id}/paradas/{parada_id}", response_model=RutaResponse)
+def editar_parada_extra(
+    ruta_id: uuid.UUID,
+    parada_id: uuid.UUID,
+    datos: ParadaExtraUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Edita una parada extra (descripción, dirección o coordenadas).
+    Solo se pueden editar paradas extra de rutas pendientes o asignadas.
+    Para quitar la dirección o las coordenadas, mandalas en null.
+    """
+    ruta, parada = _obtener_parada_extra_editable(db, ruta_id, parada_id)
+    campos = datos.model_fields_set
+
+    if "descripcion" in campos:
+        if datos.descripcion is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La descripción de la parada no puede quedar vacía"
+            )
+        parada.descripcion_extra = datos.descripcion
+    if "direccion" in campos:
+        parada.direccion_extra = datos.direccion
+    if "latitud" in campos or "longitud" in campos:
+        lat = datos.latitud if "latitud" in campos else parada.latitud
+        lon = datos.longitud if "longitud" in campos else parada.longitud
+        if (lat is None) != (lon is None):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Mandá latitud y longitud juntas, o ninguna de las dos"
+            )
+        parada.latitud = lat
+        parada.longitud = lon
+
+    db.commit()
+    db.refresh(ruta)
+    return RutaResponse.from_ruta(ruta)
+
+
+@router.delete("/{ruta_id}/paradas/{parada_id}", response_model=RutaResponse)
+def eliminar_parada_extra(
+    ruta_id: uuid.UUID,
+    parada_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Elimina una parada extra de una ruta pendiente o asignada y reordena las que siguen
+    (el orden vuelve a quedar 1, 2, 3... sin huecos). Las paradas de entrega no se
+    pueden eliminar por acá. Devuelve la ruta actualizada.
+    """
+    ruta, parada = _obtener_parada_extra_editable(db, ruta_id, parada_id)
+
+    db.delete(parada)
+    db.flush()
+    restantes = sorted((p for p in ruta.paradas if p.id != parada_id), key=lambda p: p.orden)
+    for nuevo, p in enumerate(restantes, start=1):
+        p.orden = nuevo
+
     db.commit()
     db.refresh(ruta)
     return RutaResponse.from_ruta(ruta)
