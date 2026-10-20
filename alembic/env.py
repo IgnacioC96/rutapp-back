@@ -8,7 +8,7 @@ from app.db.database import Base
 
 # Importar todos los modelos para que Base.metadata los conozca
 # (necesario para que --autogenerate detecte las tablas)
-from app.models import usuario, cliente, entrega, ruta, vehiculo  # noqa: F401
+from app.models import usuario, cliente, entrega, ruta, vehiculo, punto_salida  # noqa: F401
 
 config = context.config
 

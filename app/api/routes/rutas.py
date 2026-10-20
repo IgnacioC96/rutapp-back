@@ -21,6 +21,7 @@ from datetime import datetime, date
 import uuid
 import hmac
 from app.core.geo import distancia_metros
+from app.models.punto_salida import PuntoSalida
 
 # Si el chofer está a menos de esta distancia del punto de retorno, la ruta se cierra sola
 RADIO_LLEGADA_METROS = 150
@@ -40,6 +41,16 @@ def verificar_acceso_ruta(ruta: Ruta, current_user: dict) -> None:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="No tenés permiso para acceder a esta ruta"
             )
+
+
+def _punto_activo(db: Session, punto_id: uuid.UUID, uso: str) -> PuntoSalida:
+    punto = db.query(PuntoSalida).filter(PuntoSalida.id == punto_id, PuntoSalida.activo.is_(True)).first()
+    if not punto:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"El punto de {uso} elegido ya no existe o fue dado de baja. Elegí otro"
+        )
+    return punto
 
 
 def _error_servicio_mapas(exc: Exception) -> HTTPException:
@@ -166,6 +177,24 @@ async def crear_ruta(
                 )
             )
         entregas.append(entrega)
+
+    # Puntos de salida guardados: se copian a la ruta (si el punto cambia después, la ruta no)
+    if datos.origen_punto_id:
+        p_origen = _punto_activo(db, datos.origen_punto_id, "origen")
+        datos.origen_descripcion = p_origen.descripcion
+        datos.origen_latitud = p_origen.latitud
+        datos.origen_longitud = p_origen.longitud
+    if datos.retorno_punto_id:
+        if datos.retorno_tipo == RetornoTipo.origen:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Elegí una sola opción de retorno: volver al origen o a un punto guardado"
+            )
+        p_retorno = _punto_activo(db, datos.retorno_punto_id, "retorno")
+        datos.retorno_tipo = RetornoTipo.otro
+        datos.retorno_descripcion = p_retorno.descripcion
+        datos.retorno_latitud = p_retorno.latitud
+        datos.retorno_longitud = p_retorno.longitud
 
     # Geocodificar el punto de origen
     if datos.origen_latitud and datos.origen_longitud:

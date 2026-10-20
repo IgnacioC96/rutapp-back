@@ -4,9 +4,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.db.database import get_db
 from app.db.database import Base, engine
-from app.api.routes import auth, clientes, entregas, rutas, usuarios, seguimiento, vehiculos
+from app.api.routes import auth, clientes, entregas, rutas, usuarios, seguimiento, vehiculos, puntos_salida
 # Importar todos los modelos para que SQLAlchemy los registre
-from app.models import usuario, cliente, entrega, ruta, vehiculo
+from app.models import usuario, cliente, entrega, ruta, vehiculo, punto_salida
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import http_exception_handler as _default_http_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -53,6 +53,7 @@ app.include_router(rutas.router,     prefix="/api/v1", tags=["Rutas"])
 app.include_router(usuarios.router,  prefix="/api/v1", tags=["Usuarios"])
 app.include_router(seguimiento.router, prefix="/api/v1", tags=["Seguimiento"])
 app.include_router(vehiculos.router, prefix="/api/v1", tags=["Flota"])
+app.include_router(puntos_salida.router, prefix="/api/v1", tags=["Puntos de salida"])
 
 @app.get("/")
 def root():
