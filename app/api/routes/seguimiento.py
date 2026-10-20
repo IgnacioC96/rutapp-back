@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.models.ruta import Ruta, EstadoRuta
-from app.schemas.ruta import SeguimientoResponse, SeguimientoParadaResponse
+from app.schemas.ruta import SeguimientoResponse, SeguimientoParadaResponse, fase_ruta
 from datetime import datetime, timezone, timedelta
 
 # Router separado para evitar conflicto con /{ruta_id} en el router de rutas
@@ -30,13 +30,15 @@ def seguimiento_publico(
         )
 
     # Calcular el progreso como porcentaje de paradas completadas
-    total_paradas = len(ruta.paradas)
-    paradas_completadas = sum(1 for p in ruta.paradas if p.completada)
+    # Las paradas extra (nafta, almuerzo) no cuentan para el progreso de las entregas
+    paradas_entrega = [p for p in ruta.paradas if not p.es_parada_extra]
+    total_paradas = len(paradas_entrega)
+    paradas_completadas = sum(1 for p in paradas_entrega if p.completada)
     progreso = int((paradas_completadas / total_paradas) * 100) if total_paradas > 0 else 0
 
     # Determinar la próxima parada (la primera no completada en orden)
     proxima_parada = None
-    for parada in ruta.paradas:
+    for parada in paradas_entrega:
         if not parada.completada:
             proxima_parada = SeguimientoParadaResponse(
                 orden=parada.orden,
@@ -58,6 +60,11 @@ def seguimiento_publico(
         proxima_parada=proxima_parada,
         ultima_actualizacion=datetime.now(timezone(timedelta(hours=-3))),
         # Coordenadas actuales del chofer guardadas por PATCH /ubicacion
-        chofer_latitud=ruta.origen_latitud,
-        chofer_longitud=ruta.origen_longitud,
+        # (si todavía no reportó ubicación, se muestra el punto de salida)
+        chofer_latitud=ruta.chofer_latitud if ruta.chofer_latitud is not None else ruta.origen_latitud,
+        chofer_longitud=ruta.chofer_longitud if ruta.chofer_longitud is not None else ruta.origen_longitud,
+        fase=fase_ruta(ruta),
+        retorno_descripcion=ruta.retorno_descripcion,
+        retorno_latitud=ruta.retorno_latitud,
+        retorno_longitud=ruta.retorno_longitud,
     )

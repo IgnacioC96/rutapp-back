@@ -128,18 +128,28 @@ def algoritmo_nearest_neighbor(
 
 async def optimizar_ruta(
     origen_coords: tuple[float, float],
-    entregas_coords: list[tuple[float, float]]
-) -> tuple[list[int], float, int]:
+    entregas_coords: list[tuple[float, float]],
+    retorno_coords: tuple[float, float] | None = None
+) -> tuple[list[int], float, int, float, int]:
     """
     Funcion principal que coordina el proceso de optimizacion.
+    Si se pasa retorno_coords, suma el tramo de vuelta (ultima entrega -> retorno)
+    a los totales. El retorno NO participa del orden: solo se ordenan las entregas.
     Devuelve:
       - orden_indices: lista de indices en orden optimo
-      - total_km: distancia total del recorrido en km
-      - tiempo_total_min: tiempo estimado total en minutos
+      - total_km: distancia total del recorrido en km (incluye la vuelta)
+      - tiempo_total_min: tiempo estimado total en minutos (incluye la vuelta)
+      - retorno_km / retorno_min: tramo de vuelta (0 si no hay retorno)
     """
+    n = len(entregas_coords)
     todas_coords = [origen_coords] + entregas_coords
+    if retorno_coords is not None:
+        todas_coords.append(retorno_coords)
     duraciones, distancias = await calcular_matriz_distancias(todas_coords)
-    orden_indices = algoritmo_nearest_neighbor(0, duraciones)
+
+    # Solo se ordenan origen + entregas (el punto de retorno queda afuera de la matriz del algoritmo)
+    sub = [fila[:n + 1] for fila in duraciones[:n + 1]]
+    orden_indices = algoritmo_nearest_neighbor(0, sub)
 
     # Calcular totales recorriendo el camino optimizado
     total_km = 0.0
@@ -150,6 +160,18 @@ async def optimizar_ruta(
         tiempo_total_seg += duraciones[actual][idx]
         actual = idx
 
-    tiempo_total_min = int(tiempo_total_seg / 60)
+    retorno_km = 0.0
+    retorno_seg = 0.0
+    if retorno_coords is not None:
+        retorno_km = distancias[actual][n + 1]
+        retorno_seg = duraciones[actual][n + 1]
+        total_km += retorno_km
+        tiempo_total_seg += retorno_seg
 
-    return [i - 1 for i in orden_indices], round(total_km, 2), tiempo_total_min
+    return (
+        [i - 1 for i in orden_indices],
+        round(total_km, 2),
+        int(tiempo_total_seg / 60),
+        round(retorno_km, 2),
+        int(retorno_seg / 60),
+    )
