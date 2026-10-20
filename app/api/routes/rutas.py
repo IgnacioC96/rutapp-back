@@ -12,7 +12,7 @@ from app.schemas.ruta import (
     RutaResponse, RutaListResponse,
     ConfirmarEntregaRequest, UbicacionRequest, SeguimientoResponse,
     SeguimientoParadaResponse, ReordenarParadasRequest, ParadaExtraCreate,
-    ParadaExtraUpdate
+    ParadaExtraUpdate, RetornoTipo, fase_ruta, entregas_pendientes
 )
 from app.core.security import require_admin, get_current_user
 from app.services.optimizacion import geocodificar_direccion, optimizar_ruta, ServicioMapasError
@@ -20,6 +20,10 @@ from app.core.exceptions import logger
 from datetime import datetime, date
 import uuid
 import hmac
+from app.core.geo import distancia_metros
+
+# Si el chofer está a menos de esta distancia del punto de retorno, la ruta se cierra sola
+RADIO_LLEGADA_METROS = 150
 
 router = APIRouter(prefix="/rutas", tags=["Rutas"])
 
@@ -225,10 +229,31 @@ async def crear_ruta(
                 )
             coords_entregas[idx] = resultado
 
+    # Punto de retorno (opcional): al origen, a otra dirección o ninguno
+    retorno_coords = None          # (longitud, latitud), como ORS
+    retorno_desc = None
+    if datos.retorno_tipo == RetornoTipo.origen:
+        retorno_coords = origen_coords
+        retorno_desc = datos.origen_descripcion
+    elif datos.retorno_tipo == RetornoTipo.otro:
+        if datos.retorno_latitud is not None and datos.retorno_longitud is not None:
+            retorno_coords = (datos.retorno_longitud, datos.retorno_latitud)
+        else:
+            try:
+                retorno_coords = await geocodificar_direccion(datos.retorno_descripcion)
+            except ServicioMapasError as exc:
+                raise _error_servicio_mapas(exc)
+            if not retorno_coords:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No se pudo ubicar en el mapa la dirección de retorno. Revisala o marcá el punto en el mapa"
+                )
+        retorno_desc = datos.retorno_descripcion
+
     # Optimizar el orden de las paradas con Nearest Neighbor
     try:
-        orden_optimizado, total_km, tiempo_estimado_min = await optimizar_ruta(
-            origen_coords, list(coords_entregas)
+        orden_optimizado, total_km, tiempo_estimado_min, retorno_km, retorno_min = await optimizar_ruta(
+            origen_coords, list(coords_entregas), retorno_coords
         )
     except ServicioMapasError as exc:
         raise _error_servicio_mapas(exc)
@@ -247,7 +272,13 @@ async def crear_ruta(
         es_plantilla=datos.guardar_plantilla,
         fecha_programada=datos.fecha_programada,
         total_km=total_km,
-        tiempo_estimado_min=tiempo_estimado_min
+        tiempo_estimado_min=tiempo_estimado_min,
+        retorno_tipo=datos.retorno_tipo.value,
+        retorno_descripcion=retorno_desc,
+        retorno_latitud=retorno_coords[1] if retorno_coords else None,
+        retorno_longitud=retorno_coords[0] if retorno_coords else None,
+        retorno_km=retorno_km if retorno_coords else None,
+        retorno_min=retorno_min if retorno_coords else None
         # codigo_seguimiento se genera automáticamente en el modelo
     )
     db.add(nueva_ruta)
@@ -374,6 +405,11 @@ def finalizar_ruta(
 
     verificar_acceso_ruta(ruta, current_user)
 
+    # Si la ruta ya se cerró sola (última entrega sin retorno, o llegada al punto de retorno),
+    # finalizar no falla: devuelve la ruta tal como quedó.
+    if ruta.estado == EstadoRuta.completada:
+        return RutaResponse.from_ruta(ruta)
+
     if ruta.estado != EstadoRuta.en_curso:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -476,6 +512,17 @@ def confirmar_entrega(
     parada.completada = True
     parada.entrega.estado = EstadoEntrega.completada
 
+    # Si era la última entrega y la ruta no tiene retorno, se cierra sola.
+    # Si tiene retorno, queda en curso en fase "regreso" hasta que el chofer llegue.
+    db.flush()
+    if (
+        ruta.estado == EstadoRuta.en_curso
+        and entregas_pendientes(ruta) == 0
+        and (ruta.retorno_tipo or "ninguno") == "ninguno"
+    ):
+        ruta.estado = EstadoRuta.completada
+        ruta.finalizada_en = datetime.utcnow()
+
     db.commit()
     db.refresh(ruta)
     return RutaResponse.from_ruta(ruta)
@@ -508,12 +555,32 @@ def actualizar_ubicacion(
             detail="Solo se puede reportar ubicación en rutas en curso"
         )
 
-    # Guardar la última ubicación conocida del chofer en la ruta
-    ruta.origen_latitud = datos.latitud
-    ruta.origen_longitud = datos.longitud
+    # Guardar la última ubicación conocida del chofer (ya no pisa el origen de la ruta)
+    ruta.chofer_latitud = datos.latitud
+    ruta.chofer_longitud = datos.longitud
+    ruta.ubicacion_actualizada_en = datetime.utcnow()
+
+    # Fase de regreso: si el chofer llegó al punto de retorno, la ruta se completa sola
+    ruta_finalizada = False
+    if (
+        fase_ruta(ruta) == "regreso"
+        and ruta.retorno_latitud is not None
+        and ruta.retorno_longitud is not None
+        and distancia_metros(datos.latitud, datos.longitud, ruta.retorno_latitud, ruta.retorno_longitud)
+        <= RADIO_LLEGADA_METROS
+    ):
+        ruta.estado = EstadoRuta.completada
+        ruta.finalizada_en = datetime.utcnow()
+        ruta_finalizada = True
 
     db.commit()
-    return {"ok": True, "latitud": datos.latitud, "longitud": datos.longitud}
+    return {
+        "ok": True,
+        "latitud": datos.latitud,
+        "longitud": datos.longitud,
+        "fase": fase_ruta(ruta),
+        "ruta_finalizada": ruta_finalizada
+    }
 
 # ── Sprint 3: edición manual de rutas ────────────────────────────────────────
 

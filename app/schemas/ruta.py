@@ -76,6 +76,13 @@ class ParadaResponse(BaseModel):
             es_parada_extra=False,
         )
 
+class RetornoTipo(str, Enum):
+    """A dónde vuelve el camión al terminar las entregas."""
+    origen = "origen"      # vuelve al punto de salida
+    otro = "otro"          # vuelve a otra dirección (se elige o se escribe)
+    ninguno = "ninguno"    # no vuelve: la ruta termina en la última entrega
+
+
 class RutaCreate(BaseModel):
     """
     Body para POST /rutas.
@@ -90,6 +97,11 @@ class RutaCreate(BaseModel):
     guardar_plantilla: bool = False
     # Sprint 3 — fecha operativa para la que se planifica la ruta
     fecha_programada: Optional[date] = None
+    # Retorno al terminar: por defecto 'ninguno' (comportamiento de siempre)
+    retorno_tipo: RetornoTipo = RetornoTipo.ninguno
+    retorno_descripcion: Optional[str] = None   # solo para retorno_tipo = 'otro'
+    retorno_latitud: Optional[float] = Field(None, ge=-90, le=90)
+    retorno_longitud: Optional[float] = Field(None, ge=-180, le=180)
 
     @field_validator("nombre")
     @classmethod
@@ -99,6 +111,21 @@ class RutaCreate(BaseModel):
             raise ValueError("El nombre de la ruta no puede estar vacío")
         return v
 
+    @field_validator("retorno_descripcion")
+    @classmethod
+    def _retorno_desc(cls, v):
+        return (v.strip() or None) if v is not None else None
+
+    @model_validator(mode="after")
+    def _validar_retorno(self):
+        if self.retorno_tipo == RetornoTipo.otro:
+            tiene_coords = self.retorno_latitud is not None and self.retorno_longitud is not None
+            if (self.retorno_latitud is None) != (self.retorno_longitud is None):
+                raise ValueError("Mandá latitud y longitud de retorno juntas, o ninguna de las dos")
+            if not tiene_coords and not self.retorno_descripcion:
+                raise ValueError("Para volver a otra dirección indicá la dirección o sus coordenadas")
+        return self
+
 class RutaAsignar(BaseModel):
     """Body para PATCH /rutas/{id}/asignar."""
     chofer_id: uuid.UUID
@@ -107,6 +134,21 @@ class RutaUpdate(BaseModel):
     """Body para PATCH /rutas/{id} — edición parcial de metadatos."""
     nombre: Optional[str] = None
     origen_descripcion: Optional[str] = None
+
+def entregas_pendientes(ruta) -> int:
+    """Paradas de entrega sin confirmar (las paradas extra no cuentan)."""
+    return sum(1 for p in ruta.paradas if not p.completada and not p.es_parada_extra)
+
+
+def fase_ruta(ruta) -> Optional[str]:
+    """'entregas' | 'regreso' | None (si la ruta no está en curso)."""
+    # El estado del modelo es otro Enum que el de este schema: se compara por valor
+    if getattr(ruta.estado, "value", ruta.estado) != EstadoRuta.en_curso.value:
+        return None
+    if entregas_pendientes(ruta) == 0 and (ruta.retorno_tipo or "ninguno") != "ninguno":
+        return "regreso"
+    return "entregas"
+
 
 class RutaResponse(BaseModel):
     """
@@ -125,6 +167,20 @@ class RutaResponse(BaseModel):
     origen_descripcion: Optional[str] = None
     origen_latitud: Optional[float] = None
     origen_longitud: Optional[float] = None
+    # Retorno al terminar las entregas
+    retorno_tipo: str = "ninguno"
+    retorno_descripcion: Optional[str] = None
+    retorno_latitud: Optional[float] = None
+    retorno_longitud: Optional[float] = None
+    retorno_km: Optional[float] = None
+    retorno_min: Optional[int] = None
+    # "entregas" mientras quedan entregas por confirmar, "regreso" cuando ya se
+    # entregó todo y falta volver; null si la ruta no está en curso
+    fase: Optional[str] = None
+    # Última ubicación GPS del chofer
+    chofer_latitud: Optional[float] = None
+    chofer_longitud: Optional[float] = None
+    ubicacion_actualizada_en: Optional[datetime] = None
     chofer_id: Optional[uuid.UUID] = None
     creada_en: datetime
     iniciada_en: Optional[datetime] = None
@@ -152,6 +208,16 @@ class RutaResponse(BaseModel):
             origen_descripcion=ruta.origen_descripcion,
             origen_latitud=ruta.origen_latitud,
             origen_longitud=ruta.origen_longitud,
+            retorno_tipo=ruta.retorno_tipo or "ninguno",
+            retorno_descripcion=ruta.retorno_descripcion,
+            retorno_latitud=ruta.retorno_latitud,
+            retorno_longitud=ruta.retorno_longitud,
+            retorno_km=ruta.retorno_km,
+            retorno_min=ruta.retorno_min,
+            fase=fase_ruta(ruta),
+            chofer_latitud=ruta.chofer_latitud,
+            chofer_longitud=ruta.chofer_longitud,
+            ubicacion_actualizada_en=ruta.ubicacion_actualizada_en,
             chofer_id=ruta.chofer_id,
             creada_en=ruta.creada_en,
             iniciada_en=ruta.iniciada_en,
@@ -208,6 +274,11 @@ class SeguimientoResponse(BaseModel):
     # Ubicación actual del chofer — se actualiza cada 15 segundos
     chofer_latitud: Optional[float] = None
     chofer_longitud: Optional[float] = None
+    # Fase del recorrido y punto de retorno, para mostrar "volviendo a ..." al cliente/admin
+    fase: Optional[str] = None
+    retorno_descripcion: Optional[str] = None
+    retorno_latitud: Optional[float] = None
+    retorno_longitud: Optional[float] = None
 
     # ── Sprint 3: edición manual de rutas ─────────────────────────────────────────
 

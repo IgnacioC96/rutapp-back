@@ -45,6 +45,23 @@ class Ruta(Base):
     origen_latitud = Column(Float, nullable=True)
     origen_longitud = Column(Float, nullable=True)
 
+    # Retorno al terminar las entregas: 'origen' (vuelve al punto de salida),
+    # 'otro' (a una dirección distinta) o 'ninguno' (la ruta termina en la última entrega).
+    # Las coordenadas se guardan siempre acá (también para 'origen'), así no dependen
+    # de que el origen cambie.
+    retorno_tipo = Column(String(10), nullable=False, default="ninguno", server_default="ninguno")
+    retorno_descripcion = Column(String(255), nullable=True)
+    retorno_latitud = Column(Float, nullable=True)
+    retorno_longitud = Column(Float, nullable=True)
+    # Tramo de vuelta (última entrega → retorno), ya sumado en total_km / tiempo_estimado_min
+    retorno_km = Column(Float, nullable=True)
+    retorno_min = Column(Integer, nullable=True)
+
+    # Última ubicación GPS reportada por el chofer (antes pisaba el origen)
+    chofer_latitud = Column(Float, nullable=True)
+    chofer_longitud = Column(Float, nullable=True)
+    ubicacion_actualizada_en = Column(DateTime(timezone=True), nullable=True)
+
     # Chofer asignado — nullable hasta que el admin lo asigne
     chofer_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=True)
 
