@@ -97,6 +97,9 @@ class RutaCreate(BaseModel):
     guardar_plantilla: bool = False
     # Sprint 3 — fecha operativa para la que se planifica la ruta
     fecha_programada: Optional[date] = None
+    # Puntos de salida guardados (ver /puntos-salida). Si se mandan, pisan al origen/retorno manual.
+    origen_punto_id: Optional[uuid.UUID] = None
+    retorno_punto_id: Optional[uuid.UUID] = None
     # Retorno al terminar: por defecto 'ninguno' (comportamiento de siempre)
     retorno_tipo: RetornoTipo = RetornoTipo.ninguno
     retorno_descripcion: Optional[str] = None   # solo para retorno_tipo = 'otro'
