@@ -58,6 +58,51 @@ logger = setup_logging()
 
 # ── Exception Handlers ────────────────────────────────────────────────────────
 
+def _mensaje_en_espanol(error: dict) -> str:
+    """Traduce los mensajes de validación de Pydantic a español claro para el usuario."""
+    tipo = error.get("type", "")
+    msg = error.get("msg", "")
+    ctx = error.get("ctx") or {}
+    campo = str(error["loc"][-1]) if error.get("loc") else ""
+
+    if tipo == "missing":
+        return "Este campo es obligatorio"
+    if tipo == "string_too_short":
+        return f"Debe tener al menos {ctx.get('min_length')} caracteres"
+    if tipo == "string_too_long":
+        return f"Puede tener como máximo {ctx.get('max_length')} caracteres"
+    if tipo in ("greater_than", "greater_than_equal"):
+        limite = ctx.get("gt", ctx.get("ge"))
+        return f"Debe ser mayor a {limite}" if tipo == "greater_than" else f"Debe ser como mínimo {limite}"
+    if tipo in ("less_than", "less_than_equal"):
+        limite = ctx.get("lt", ctx.get("le"))
+        return f"Debe ser menor a {limite}" if tipo == "less_than" else f"Debe ser como máximo {limite}"
+    if tipo in ("int_parsing", "float_parsing", "int_from_float", "decimal_parsing"):
+        return "Debe ser un número válido"
+    if tipo in ("string_type", "str_type"):
+        return "Debe ser un texto"
+    if tipo == "bool_parsing" or tipo == "bool_type":
+        return "Debe ser verdadero o falso"
+    if tipo in ("date_parsing", "date_from_datetime_parsing", "date_type"):
+        return "Fecha inválida: usá el formato AAAA-MM-DD"
+    if tipo in ("datetime_parsing", "datetime_type"):
+        return "Fecha y hora inválidas"
+    if tipo == "uuid_parsing":
+        return "Identificador inválido"
+    if tipo in ("enum", "literal_error"):
+        return "Valor no permitido"
+    if tipo == "json_invalid":
+        return "El cuerpo de la petición no es un JSON válido"
+    if tipo in ("list_type", "too_short"):
+        return "Debe ser una lista con al menos un elemento" if tipo == "too_short" else "Debe ser una lista"
+    if tipo == "value_error":
+        if campo == "email" or "email address" in msg:
+            return "El email no es válido"
+        # Los validadores propios ya devuelven el mensaje en español
+        return msg.removeprefix("Value error, ")
+    return msg
+
+
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """
     Intercepta errores de validación de Pydantic (422 Unprocessable Entity).
@@ -68,7 +113,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         campo = " → ".join(str(e) for e in error["loc"] if e != "body")
         errores.append({
             "campo": campo,
-            "mensaje": error["msg"],
+            "mensaje": _mensaje_en_espanol(error),
             "tipo": error["type"]
         })
 
