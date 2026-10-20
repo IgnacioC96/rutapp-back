@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime, date
 from enum import Enum
@@ -90,6 +90,14 @@ class RutaCreate(BaseModel):
     guardar_plantilla: bool = False
     # Sprint 3 — fecha operativa para la que se planifica la ruta
     fecha_programada: Optional[date] = None
+
+    @field_validator("nombre")
+    @classmethod
+    def _nombre(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("El nombre de la ruta no puede estar vacío")
+        return v
 
 class RutaAsignar(BaseModel):
     """Body para PATCH /rutas/{id}/asignar."""
@@ -228,8 +236,52 @@ class ParadaExtraCreate(BaseModel):
     Las paradas extra no son entregas a clientes — son paradas operativas
     como carga de nafta, almuerzo, parada técnica, etc.
     """
-    descripcion: str                    # ej: "Carga de nafta YPF Morón"
-    direccion: Optional[str] = None     # dirección opcional de la parada
-    orden: Optional[int] = None         # posición deseada (al final si no se especifica)
-    latitud: Optional[float] = None     # coordenadas opcionales para el mapa
-    longitud: Optional[float] = None
+    descripcion: str = Field(..., max_length=200)   # ej: "Carga de nafta YPF Morón"
+    direccion: Optional[str] = Field(None, max_length=255)  # dirección opcional de la parada
+    orden: Optional[int] = Field(None, ge=1)        # posición deseada (al final si no se especifica)
+    latitud: Optional[float] = Field(None, ge=-90, le=90)   # coordenadas opcionales para el mapa
+    longitud: Optional[float] = Field(None, ge=-180, le=180)
+
+    @field_validator("descripcion")
+    @classmethod
+    def _descripcion(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("La descripción de la parada no puede estar vacía")
+        return v
+
+    @field_validator("direccion")
+    @classmethod
+    def _direccion(cls, v):
+        return (v.strip() or None) if v is not None else None
+
+    @model_validator(mode="after")
+    def _coordenadas_juntas(self):
+        if (self.latitud is None) != (self.longitud is None):
+            raise ValueError("Mandá latitud y longitud juntas, o ninguna de las dos")
+        return self
+
+
+class ParadaExtraUpdate(BaseModel):
+    """Body para PATCH /rutas/{id}/paradas/{parada_id} — editar una parada extra.
+    Todos los campos son opcionales; solo se cambian los que se mandan.
+    Para quitar la dirección o las coordenadas, mandalas en null."""
+    descripcion: Optional[str] = Field(None, max_length=200)
+    direccion: Optional[str] = Field(None, max_length=255)
+    latitud: Optional[float] = Field(None, ge=-90, le=90)
+    longitud: Optional[float] = Field(None, ge=-180, le=180)
+
+    @field_validator("descripcion")
+    @classmethod
+    def _descripcion(cls, v):
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("La descripción de la parada no puede estar vacía")
+        return v
+
+    @field_validator("direccion")
+    @classmethod
+    def _direccion(cls, v):
+        return (v.strip() or None) if v is not None else None
