@@ -98,7 +98,7 @@ def test_ruta_se_cierra_sola_cuando_todo_esta_resuelto(client, fab, chofer_a):
     _confirmar(client, fab, ruta["id"], p1["entrega_id"], chofer_a)
     r = _no_entregada(client, ruta["id"], p2["entrega_id"], chofer_a)  # motivo por defecto: nadie_recibio
     assert r.status_code == 200
-    assert r.json()["estado"] == "completada"
+    assert r.json()["estado"] == "finalizada"
     assert r.json()["paradas"][1]["motivo_omision"] == "nadie_recibio"
 
 
@@ -106,7 +106,7 @@ def test_todas_no_entregadas_tambien_cierra_la_ruta(client, fab, chofer_a):
     ruta = fab.ruta_en_curso(chofer_a, cantidad=2)
     for p in ruta["paradas"]:
         r = _no_entregada(client, ruta["id"], p["entrega_id"], chofer_a, motivo="cliente_ausente")
-    assert r.json()["estado"] == "completada"
+    assert r.json()["estado"] == "finalizada"
 
 
 def test_con_retorno_pasa_a_fase_regreso(client, fab, chofer_a):
@@ -124,7 +124,7 @@ def test_finalizar_con_omitidas_no_las_cuenta_como_pendientes(client, fab, chofe
     _no_entregada(client, ruta["id"], p3["entrega_id"], chofer_a)
     r = client.patch(f"{API}/rutas/{ruta['id']}/finalizar", headers=chofer_a["headers"])
     assert r.status_code == 200
-    assert r.json()["estado"] == "completada"
+    assert r.json()["estado"] == "finalizada"
 
 
 def test_entrega_no_entregada_se_puede_replanificar(client, fab, chofer_a):
@@ -173,3 +173,16 @@ def test_seguimiento_publico_salta_las_omitidas(client, fab, chofer_a):
     pub = client.get(f"{API}/seguimiento/{ruta['codigo_seguimiento']}").json()
     assert pub["progreso"] == 50
     assert pub["proxima_parada"]["orden"] == p2["orden"]
+
+
+def test_ruta_sin_omitidas_sigue_cerrando_como_completada(client, fab, chofer_a):
+    ruta = fab.ruta_en_curso(chofer_a, cantidad=1)
+    r = _confirmar(client, fab, ruta["id"], ruta["paradas"][0]["entrega_id"], chofer_a)
+    assert r.json()["estado"] == "completada"
+
+
+def test_seguimiento_publico_no_expone_datos_del_cliente(client, fab, chofer_a):
+    ruta = fab.ruta_en_curso(chofer_a, cantidad=3)
+    p = client.get(f"{API}/seguimiento/{ruta['codigo_seguimiento']}").json()["proxima_parada"]
+    assert p["cliente"] == "Parada 1 de 3"
+    assert p["direccion"] == ""

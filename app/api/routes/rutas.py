@@ -45,7 +45,8 @@ def verificar_acceso_ruta(ruta: Ruta, current_user: dict) -> None:
 
 def _cerrar_si_termino(ruta: Ruta) -> None:
     """
-    Si ya no quedan entregas sin resolver y la ruta no tiene retorno, se cierra sola como 'completada'.
+    Si ya no quedan entregas sin resolver y la ruta no tiene retorno, se cierra sola: 'completada' si se
+    entregó todo, 'finalizada' si alguna quedó como "no entregada" (para que el admin la note y reprograme).
     Si tiene retorno queda en curso (fase "regreso") hasta que el chofer llegue.
     Lo usan confirmar_entrega y marcar_no_entregada, así las dos reglas no se desfasan.
     """
@@ -54,8 +55,14 @@ def _cerrar_si_termino(ruta: Ruta) -> None:
         and entregas_pendientes(ruta) == 0
         and (ruta.retorno_tipo or "ninguno") == "ninguno"
     ):
-        ruta.estado = EstadoRuta.completada
+        _estado_final(ruta)
         ruta.finalizada_en = datetime.utcnow()
+
+
+def _estado_final(ruta: Ruta) -> None:
+    """Estado de cierre: 'finalizada' si hubo paradas no entregadas, 'completada' si no."""
+    hubo_omitidas = any(p.omitida and not p.es_parada_extra for p in ruta.paradas)
+    ruta.estado = EstadoRuta.finalizada if hubo_omitidas else EstadoRuta.completada
 
 
 def _punto_activo(db: Session, punto_id: uuid.UUID, uso: str) -> PuntoSalida:
@@ -502,8 +509,8 @@ def finalizar_ruta(
                 parada.entrega.estado = EstadoEntrega.pendiente
                 parada.entrega.ruta_id = None  # queda libre para planificarla en otra ruta
     else:
-        # Todas las paradas confirmadas — ruta completada exitosamente
-        ruta.estado = EstadoRuta.completada
+        # Nada pendiente: 'completada' si se entregó todo, 'finalizada' si hubo no entregadas
+        _estado_final(ruta)
 
     ruta.finalizada_en = datetime.utcnow()
     db.commit()
@@ -739,7 +746,7 @@ def actualizar_ubicacion(
         and distancia_metros(datos.latitud, datos.longitud, ruta.retorno_latitud, ruta.retorno_longitud)
         <= RADIO_LLEGADA_METROS
     ):
-        ruta.estado = EstadoRuta.completada
+        _estado_final(ruta)
         ruta.finalizada_en = datetime.utcnow()
         ruta_finalizada = True
 

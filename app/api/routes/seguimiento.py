@@ -43,8 +43,9 @@ def seguimiento_publico(
         if not parada.completada and not parada.omitida:
             proxima_parada = SeguimientoParadaResponse(
                 orden=parada.orden,
-                cliente=parada.entrega.cliente.nombre,
-                direccion=parada.entrega.direccion.descripcion,
+                # Vista pública: no se expone el nombre ni la dirección del cliente
+                cliente=f"Parada {paradas_entrega.index(parada) + 1} de {total_paradas}",
+                direccion="",
                 completada=parada.completada
             )
             break
