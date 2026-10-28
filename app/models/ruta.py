@@ -7,7 +7,7 @@ Las paradas pueden ser entregas a clientes o paradas extra (nafta, comida, etc.)
 import uuid
 import enum
 import secrets
-from sqlalchemy import Column, String, Boolean, ForeignKey, Float, Integer, DateTime, Enum, Date
+from sqlalchemy import Column, String, Boolean, ForeignKey, Float, Integer, DateTime, Enum, Date, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -139,6 +139,17 @@ class ParadaRuta(Base):
     es_parada_extra = Column(Boolean, default=False)
     descripcion_extra = Column(String(200), nullable=True)  # ej: "Carga de nafta YPF"
     direccion_extra = Column(String(255), nullable=True)    # dirección de la parada extra
+
+    # Parche 2 — nota libre del chofer sobre esta parada. La puede dejar en cualquier momento del
+    # recorrido, confirme o no la entrega. La ve el administrador (y el propio chofer), nunca el cliente.
+    nota_chofer = Column(Text, nullable=True)
+    nota_chofer_en = Column(DateTime(timezone=True), nullable=True)
+
+    # Parche 2 — "no se pudo entregar": el chofer sigue la ruta sin confirmar esta parada.
+    # La entrega vuelve a pendiente (para reprogramarla) y la parada queda como histórico.
+    omitida = Column(Boolean, nullable=False, default=False, server_default="false")
+    motivo_omision = Column(String(30), nullable=True)
+    omitida_en = Column(DateTime(timezone=True), nullable=True)
 
     # Relaciones ORM
     ruta = relationship("Ruta", back_populates="paradas")
