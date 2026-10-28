@@ -33,13 +33,14 @@ def seguimiento_publico(
     # Las paradas extra (nafta, almuerzo) no cuentan para el progreso de las entregas
     paradas_entrega = [p for p in ruta.paradas if not p.es_parada_extra]
     total_paradas = len(paradas_entrega)
-    paradas_completadas = sum(1 for p in paradas_entrega if p.completada)
+    # Una parada "no entregada" también está resuelta: el chofer ya siguió de largo
+    paradas_completadas = sum(1 for p in paradas_entrega if p.completada or p.omitida)
     progreso = int((paradas_completadas / total_paradas) * 100) if total_paradas > 0 else 0
 
     # Determinar la próxima parada (la primera no completada en orden)
     proxima_parada = None
     for parada in paradas_entrega:
-        if not parada.completada:
+        if not parada.completada and not parada.omitida:
             proxima_parada = SeguimientoParadaResponse(
                 orden=parada.orden,
                 cliente=parada.entrega.cliente.nombre,

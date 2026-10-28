@@ -36,6 +36,10 @@ class ParadaResponse(BaseModel):
     es_parada_extra: bool = False
     descripcion_extra: Optional[str] = None
     direccion_extra: Optional[str] = None
+    # Parche 2 — nota del chofer y "no se pudo entregar"
+    nota_chofer: Optional[str] = None
+    omitida: bool = False
+    motivo_omision: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -61,6 +65,7 @@ class ParadaResponse(BaseModel):
                 es_parada_extra=True,
                 descripcion_extra=parada.descripcion_extra,
                 direccion_extra=parada.direccion_extra,
+                nota_chofer=parada.nota_chofer,
             )
         # Parada normal de entrega a cliente
         return cls(
@@ -75,6 +80,9 @@ class ParadaResponse(BaseModel):
             latitud=parada.latitud,
             longitud=parada.longitud,
             es_parada_extra=False,
+            nota_chofer=parada.nota_chofer,
+            omitida=bool(parada.omitida),
+            motivo_omision=parada.motivo_omision,
         )
 
 class RetornoTipo(str, Enum):
@@ -142,8 +150,9 @@ class RutaUpdate(BaseModel):
     origen_descripcion: Optional[str] = None
 
 def entregas_pendientes(ruta) -> int:
-    """Paradas de entrega sin confirmar (las paradas extra no cuentan)."""
-    return sum(1 for p in ruta.paradas if not p.completada and not p.es_parada_extra)
+    """Paradas de entrega sin resolver: ni confirmadas ni marcadas "no se pudo entregar".
+    Las paradas extra no cuentan."""
+    return sum(1 for p in ruta.paradas if not p.completada and not p.omitida and not p.es_parada_extra)
 
 
 def fase_ruta(ruta) -> Optional[str]:
@@ -247,6 +256,44 @@ class ConfirmarEntregaRequest(BaseModel):
     El chofer ingresa el código QR o manual para confirmar la entrega.
     """
     codigo: str
+
+class NotaParadaRequest(BaseModel):
+    """
+    Body para PATCH /rutas/{id}/paradas/{parada_id}/nota.
+    El chofer deja (o borra, mandando null o vacío) una nota sobre la parada.
+    Se puede escribir esté o no confirmada la entrega.
+    """
+    nota: Optional[str] = Field(None, max_length=1000)
+
+    @field_validator("nota")
+    @classmethod
+    def _nota(cls, v):
+        return (v.strip() or None) if v is not None else None
+
+
+class MotivoNoEntrega(str, Enum):
+    """Por qué no se pudo entregar. 'nadie_recibio' es el caso típico (nadie atendió)."""
+    nadie_recibio = "nadie_recibio"
+    cliente_ausente = "cliente_ausente"
+    direccion_incorrecta = "direccion_incorrecta"
+    rechazada = "rechazada"
+    otro = "otro"
+
+
+class NoEntregadaRequest(BaseModel):
+    """
+    Body para PATCH /rutas/{id}/entregas/{entrega_id}/no-entregada.
+    El chofer avisa que no pudo entregar y sigue con la próxima parada.
+    La nota es opcional y queda guardada en la parada (la ve el administrador).
+    """
+    motivo: MotivoNoEntrega = MotivoNoEntrega.nadie_recibio
+    nota: Optional[str] = Field(None, max_length=1000)
+
+    @field_validator("nota")
+    @classmethod
+    def _nota(cls, v):
+        return (v.strip() or None) if v is not None else None
+
 
 class UbicacionRequest(BaseModel):
     """

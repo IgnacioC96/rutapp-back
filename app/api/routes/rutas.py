@@ -10,7 +10,7 @@ from app.models.usuario import Usuario, RolUsuario
 from app.schemas.ruta import (
     RutaCreate, RutaAsignar, RutaUpdate,
     RutaResponse, RutaListResponse,
-    ConfirmarEntregaRequest, UbicacionRequest, SeguimientoResponse,
+    ConfirmarEntregaRequest, NotaParadaRequest, NoEntregadaRequest, UbicacionRequest, SeguimientoResponse,
     SeguimientoParadaResponse, ReordenarParadasRequest, ParadaExtraCreate,
     ParadaExtraUpdate, RetornoTipo, fase_ruta, entregas_pendientes
 )
@@ -41,6 +41,21 @@ def verificar_acceso_ruta(ruta: Ruta, current_user: dict) -> None:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="No tenés permiso para acceder a esta ruta"
             )
+
+
+def _cerrar_si_termino(ruta: Ruta) -> None:
+    """
+    Si ya no quedan entregas sin resolver y la ruta no tiene retorno, se cierra sola como 'completada'.
+    Si tiene retorno queda en curso (fase "regreso") hasta que el chofer llegue.
+    Lo usan confirmar_entrega y marcar_no_entregada, así las dos reglas no se desfasan.
+    """
+    if (
+        ruta.estado == EstadoRuta.en_curso
+        and entregas_pendientes(ruta) == 0
+        and (ruta.retorno_tipo or "ninguno") == "ninguno"
+    ):
+        ruta.estado = EstadoRuta.completada
+        ruta.finalizada_en = datetime.utcnow()
 
 
 def _punto_activo(db: Session, punto_id: uuid.UUID, uso: str) -> PuntoSalida:
@@ -475,7 +490,7 @@ def finalizar_ruta(
     # Las paradas extra (es_parada_extra=True) no cuentan como pendientes
     paradas_pendientes = [
         p for p in ruta.paradas
-        if not p.completada and not p.es_parada_extra
+        if not p.completada and not p.omitida and not p.es_parada_extra
     ]
 
     if paradas_pendientes:
@@ -543,6 +558,11 @@ def confirmar_entrega(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Esta entrega ya fue confirmada"
         )
+    if parada.omitida:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Esta entrega fue marcada como no entregada. Volvé a planificarla en otra ruta"
+        )
 
     # Verificar el código de confirmación.
     # Es un código aleatorio guardado en la entrega (NO derivado de su ID) que conoce
@@ -571,13 +591,107 @@ def confirmar_entrega(
     # Si era la última entrega y la ruta no tiene retorno, se cierra sola.
     # Si tiene retorno, queda en curso en fase "regreso" hasta que el chofer llegue.
     db.flush()
-    if (
-        ruta.estado == EstadoRuta.en_curso
-        and entregas_pendientes(ruta) == 0
-        and (ruta.retorno_tipo or "ninguno") == "ninguno"
-    ):
-        ruta.estado = EstadoRuta.completada
-        ruta.finalizada_en = datetime.utcnow()
+    _cerrar_si_termino(ruta)
+
+    db.commit()
+    db.refresh(ruta)
+    return RutaResponse.from_ruta(ruta)
+
+
+@router.patch("/{ruta_id}/entregas/{entrega_id}/no-entregada", response_model=RutaResponse)
+def marcar_no_entregada(
+    ruta_id: uuid.UUID,
+    entrega_id: uuid.UUID,
+    datos: NoEntregadaRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    El chofer avisa que NO pudo entregar (nadie recibió, cliente ausente, etc.) para poder seguir.
+    - La parada queda como 'omitida' (no cuenta como pendiente: la ruta puede continuar y cerrarse).
+    - La entrega vuelve a 'pendiente' y se desvincula de la ruta, para que el administrador la reprograme.
+    - La nota (opcional) queda en la parada; solo la ven el administrador y el propio chofer.
+    """
+    ruta = db.query(Ruta).filter(Ruta.id == ruta_id).with_for_update().first()
+    if not ruta:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ruta no encontrada")
+
+    verificar_acceso_ruta(ruta, current_user)
+
+    if ruta.estado != EstadoRuta.en_curso:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se puede marcar una entrega como no entregada en rutas en curso"
+        )
+
+    # populate_existing: con la ruta bloqueada, se relee la parada tal como está ahora
+    parada = db.query(ParadaRuta).filter(
+        ParadaRuta.ruta_id == ruta_id,
+        ParadaRuta.entrega_id == entrega_id
+    ).populate_existing().first()
+    if not parada:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entrega no encontrada en esta ruta")
+
+    if parada.completada:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Esta entrega ya fue confirmada")
+    if parada.omitida:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Esta entrega ya fue marcada como no entregada")
+
+    ahora = datetime.utcnow()
+    parada.omitida = True
+    parada.motivo_omision = datos.motivo.value
+    parada.omitida_en = ahora
+    if datos.nota:
+        parada.nota_chofer = datos.nota
+        parada.nota_chofer_en = ahora
+
+    # La entrega queda libre para reprogramarse en otra ruta
+    if parada.entrega:
+        parada.entrega.estado = EstadoEntrega.pendiente
+        parada.entrega.ruta_id = None
+
+    db.flush()
+    _cerrar_si_termino(ruta)
+
+    db.commit()
+    db.refresh(ruta)
+    return RutaResponse.from_ruta(ruta)
+
+
+@router.patch("/{ruta_id}/paradas/{parada_id}/nota", response_model=RutaResponse)
+def dejar_nota_parada(
+    ruta_id: uuid.UUID,
+    parada_id: uuid.UUID,
+    datos: NotaParadaRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    El chofer deja una nota sobre una parada (ej: "portón azul, dejé con el vecino", "nadie atendió").
+    Se puede escribir en cualquier momento de la ruta en curso, haya confirmado la entrega o no.
+    Mandar nota null o vacía la borra. Reemplaza la nota anterior.
+    """
+    ruta = db.query(Ruta).filter(Ruta.id == ruta_id).with_for_update().first()
+    if not ruta:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ruta no encontrada")
+
+    verificar_acceso_ruta(ruta, current_user)
+
+    if ruta.estado != EstadoRuta.en_curso:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se pueden dejar notas en rutas en curso"
+        )
+
+    parada = db.query(ParadaRuta).filter(
+        ParadaRuta.id == parada_id,
+        ParadaRuta.ruta_id == ruta_id
+    ).populate_existing().first()
+    if not parada:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parada no encontrada en esta ruta")
+
+    parada.nota_chofer = datos.nota
+    parada.nota_chofer_en = datetime.utcnow() if datos.nota else None
 
     db.commit()
     db.refresh(ruta)
