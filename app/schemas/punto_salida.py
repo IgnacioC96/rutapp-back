@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime
 import uuid
+from app.core.geo import coordenadas_validas
 
 
 def _limpiar(v: Optional[str]) -> Optional[str]:
@@ -35,8 +36,7 @@ class PuntoSalidaCreate(BaseModel):
 
     @model_validator(mode="after")
     def _coords_juntas(self):
-        if (self.latitud is None) != (self.longitud is None):
-            raise ValueError("Mandá latitud y longitud juntas, o ninguna de las dos")
+        coordenadas_validas(self.latitud, self.longitud)
         return self
 
 
@@ -59,8 +59,7 @@ class PuntoSalidaUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _coords_juntas(self):
-        if (self.latitud is None) != (self.longitud is None):
-            raise ValueError("Mandá latitud y longitud juntas, o ninguna de las dos")
+        coordenadas_validas(self.latitud, self.longitud)
         return self
 
 

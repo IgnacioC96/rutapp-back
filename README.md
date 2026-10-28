@@ -163,9 +163,29 @@ rutapp-back/
 
 └── .env                 # No incluido en el repo
 
+## Tests automáticos
+
+La suite (`tests/`) corre contra una base PostgreSQL **real** y cubre autorización por rol, concurrencia
+(una entrega nunca queda en dos rutas), validación estricta de coordenadas, reglas de negocio de clientes,
+reordenamiento de paradas y el código de confirmación.
+
+```bash
+# 1. Crear una base SOLO para tests (el nombre debe contener "test": los tests borran y recrean sus tablas)
+createdb rutapp_test
+
+# 2. Dependencias de desarrollo
+pip install -r requirements-dev.txt
+
+# 3. Apuntar a esa base y correr
+export TEST_DATABASE_URL="postgresql://USUARIO:CLAVE@localhost:5432/rutapp_test"   # PowerShell: $env:TEST_DATABASE_URL="..."
+pytest
+```
+
+No necesitan internet ni la clave de OpenRouteService: el servicio de mapas se reemplaza por uno falso.
+
 ## Equipo
 
-**Geonexusar** — Instituto Técnico Leopoldo Marechal · PP3 · 2026
+**RutApp** — Instituto Técnico Leopoldo Marechal · PP3 · 2026
 
 - Ignacio Campaniello — Back-End
 - Raúl Gilmar Rodriguez — Front-End  

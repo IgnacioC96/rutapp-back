@@ -238,7 +238,7 @@ def editar_entrega(
     Edita una entrega existente.
     Solo se pueden editar entregas en estado pendiente.
     """
-    entrega = db.query(Entrega).filter(Entrega.id == entrega_id).first()
+    entrega = db.query(Entrega).filter(Entrega.id == entrega_id).with_for_update().first()
     if not entrega:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -295,7 +295,7 @@ def cancelar_entrega(
     """
     Cancela una entrega. Solo se pueden cancelar entregas pendientes.
     """
-    entrega = db.query(Entrega).filter(Entrega.id == entrega_id).first()
+    entrega = db.query(Entrega).filter(Entrega.id == entrega_id).with_for_update().first()
     if not entrega:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -326,7 +326,7 @@ def completar_entrega(
     La confirmación del chofer en campo se hace SOLO con
     PATCH /rutas/{ruta_id}/entregas/{entrega_id}/confirmar, que exige el código secreto.
     """
-    entrega = db.query(Entrega).filter(Entrega.id == entrega_id).first()
+    entrega = db.query(Entrega).filter(Entrega.id == entrega_id).with_for_update().first()
     if not entrega:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

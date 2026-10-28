@@ -186,7 +186,11 @@ def editar_cliente(
                 )
                 db.add(nueva_dir)
 
-        # Borrar solo las direcciones que no tienen entregas asociadas
+        # Borrar solo las direcciones que no tienen entregas asociadas.
+        # Las que se conservan por tener entregas siguen existiendo aunque no vengan en el
+        # request: no pueden quedar como "principal" (la principal es la que se mandó) ni
+        # hacer que el cliente supere el máximo de direcciones.
+        conservadas = 0
         for id_existente, dir_obj in ids_existentes.items():
             if id_existente not in ids_recibidos:
                 tiene_entregas = db.query(Entrega).filter(
@@ -194,6 +198,18 @@ def editar_cliente(
                 ).first()
                 if not tiene_entregas:
                     db.delete(dir_obj)
+                else:
+                    dir_obj.es_principal = False
+                    conservadas += 1
+        if len(datos.direcciones) + conservadas > 3:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "El cliente no puede tener más de 3 direcciones: hay direcciones con entregas "
+                    "asociadas que no se pueden eliminar. Incluilas en la lista o editalas"
+                )
+            )
 
     db.commit()
     db.refresh(cliente)
