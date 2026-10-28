@@ -3,7 +3,8 @@
 Schemas Pydantic para la gestión de clientes y sus direcciones.
 Define los contratos de entrada y salida de la API para el módulo de clientes.
 """
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+from app.core.geo import coordenadas_validas
 from app.core.telefono import normalizar_telefono_ar
 from typing import List, Optional
 import uuid
@@ -24,8 +25,33 @@ class DireccionCreate(BaseModel):
     referencia: Optional[str] = None
     es_principal: bool = False
     # Sprint 3 — coordenadas del pin fijado en el mapa (opcionales)
-    latitud: Optional[float] = None
-    longitud: Optional[float] = None
+    latitud: Optional[float] = Field(None, ge=-90, le=90)
+    longitud: Optional[float] = Field(None, ge=-180, le=180)
+
+    @field_validator("descripcion")
+    @classmethod
+    def _descripcion(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("La dirección no puede estar vacía")
+        return v
+
+    @model_validator(mode="after")
+    def _coordenadas(self):
+        coordenadas_validas(self.latitud, self.longitud)
+        return self
+
+
+def validar_lista_direcciones(direcciones):
+    """Reglas de negocio de las direcciones de un cliente (alta y edición)."""
+    if len(direcciones) == 0:
+        raise ValueError("Debe tener al menos una dirección")
+    if len(direcciones) > 3:
+        raise ValueError("Máximo 3 direcciones permitidas")
+    principales = [d for d in direcciones if d.es_principal]
+    if len(principales) != 1:
+        raise ValueError("Debe haber exactamente una dirección principal")
+    return direcciones
 
 
 class DireccionResponse(BaseModel):
@@ -80,14 +106,7 @@ class ClienteCreate(BaseModel):
     @classmethod
     def validar_direcciones(cls, direcciones):
         """Valida que las direcciones cumplan las reglas de negocio."""
-        if len(direcciones) == 0:
-            raise ValueError("Debe tener al menos una dirección")
-        if len(direcciones) > 3:
-            raise ValueError("Máximo 3 direcciones permitidas")
-        principales = [d for d in direcciones if d.es_principal]
-        if len(principales) != 1:
-            raise ValueError("Debe haber exactamente una dirección principal")
-        return direcciones
+        return validar_lista_direcciones(direcciones)
 
 
 class ClienteUpdate(BaseModel):
@@ -101,6 +120,12 @@ class ClienteUpdate(BaseModel):
     direcciones: Optional[List[DireccionCreate]] = None
     cuit: Optional[str] = None
     notas: Optional[str] = None
+
+    @field_validator("direcciones")
+    @classmethod
+    def validar_direcciones(cls, direcciones):
+        """Si se mandan direcciones, deben cumplir las mismas reglas que en el alta."""
+        return validar_lista_direcciones(direcciones) if direcciones is not None else None
 
     @field_validator("telefono_whatsapp")
     @classmethod

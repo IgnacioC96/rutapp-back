@@ -197,7 +197,7 @@ async def crear_ruta(
         datos.retorno_longitud = p_retorno.longitud
 
     # Geocodificar el punto de origen
-    if datos.origen_latitud and datos.origen_longitud:
+    if datos.origen_latitud is not None and datos.origen_longitud is not None:
         # Si ya vienen coordenadas, usarlas directamente
         origen_coords = (datos.origen_longitud, datos.origen_latitud)
     elif datos.origen_descripcion:
@@ -287,11 +287,35 @@ async def crear_ruta(
     except ServicioMapasError as exc:
         raise _error_servicio_mapas(exc)
 
+    # Control de concurrencia: mientras se geocodificaba y optimizaba (varios segundos) otro
+    # administrador pudo haber tomado alguna de estas entregas. Se vuelven a leer BLOQUEADAS
+    # (SELECT ... FOR UPDATE) y se revalida el estado antes de escribir: así una misma entrega
+    # nunca queda en dos rutas. Desde este punto hasta el commit no hay esperas intermedias.
+    bloqueadas = {
+        e.id: e for e in db.query(Entrega)
+        .filter(Entrega.id.in_([e.id for e in entregas]))
+        .with_for_update()
+        .populate_existing()
+        .all()
+    }
+    for e in entregas:
+        actual = bloqueadas.get(e.id)
+        if actual is None or actual.estado != EstadoEntrega.pendiente:
+            nombre_cliente = e.cliente.nombre
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"La entrega de {nombre_cliente} fue tomada por otra ruta mientras planificabas. "
+                    "Actualizá la lista de entregas pendientes e intentá de nuevo"
+                )
+            )
+
     # Crear la ruta en la BD con los campos del Sprint 3
 
     # Usar coordenadas del body si vienen, o las geocodificadas
-    origen_lat_final = datos.origen_latitud or (origen_coords[1] if origen_coords else None)
-    origen_lon_final = datos.origen_longitud or (origen_coords[0] if origen_coords else None)
+    origen_lat_final = datos.origen_latitud if datos.origen_latitud is not None else (origen_coords[1] if origen_coords else None)
+    origen_lon_final = datos.origen_longitud if datos.origen_longitud is not None else (origen_coords[0] if origen_coords else None)
 
     nueva_ruta = Ruta(
         nombre=datos.nombre,
@@ -328,8 +352,10 @@ async def crear_ruta(
         )
         db.add(parada)
 
-        # Cambiar estado de la entrega a "en_curso"
+        # Cambiar estado de la entrega a "en_curso" y vincularla a su ruta actual
+        # (de ahí sale qué entregas ve cada chofer)
         entrega.estado = EstadoEntrega.en_curso
+        entrega.ruta_id = nueva_ruta.id
 
     db.commit()
     db.refresh(nueva_ruta)
@@ -347,7 +373,7 @@ def asignar_chofer(
     Asigna un chofer a una ruta pendiente.
     Verifica que el usuario exista y tenga rol de chofer.
     """
-    ruta = db.query(Ruta).filter(Ruta.id == ruta_id).first()
+    ruta = db.query(Ruta).filter(Ruta.id == ruta_id).with_for_update().first()
     if not ruta:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -390,7 +416,7 @@ def iniciar_ruta(
     Registra el timestamp exacto de inicio.
     Solo puede iniciarlo el chofer asignado a esa ruta.
     """
-    ruta = db.query(Ruta).filter(Ruta.id == ruta_id).first()
+    ruta = db.query(Ruta).filter(Ruta.id == ruta_id).with_for_update().first()
     if not ruta:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -425,7 +451,7 @@ def finalizar_ruta(
     Si quedan entregas sin confirmar → estado 'finalizada' (emergencia).
     Las entregas que quedaron en_curso vuelven a pendiente.
     """
-    ruta = db.query(Ruta).filter(Ruta.id == ruta_id).first()
+    ruta = db.query(Ruta).filter(Ruta.id == ruta_id).with_for_update().first()
     if not ruta:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -459,6 +485,7 @@ def finalizar_ruta(
         for parada in paradas_pendientes:
             if parada.entrega:  # Verificar que la parada tiene entrega asociada
                 parada.entrega.estado = EstadoEntrega.pendiente
+                parada.entrega.ruta_id = None  # queda libre para planificarla en otra ruta
     else:
         # Todas las paradas confirmadas — ruta completada exitosamente
         ruta.estado = EstadoRuta.completada
@@ -485,7 +512,7 @@ def confirmar_entrega(
     Marca la parada como completada y la entrega como completada.
     """
     # Verificar que la ruta existe y está en curso
-    ruta = db.query(Ruta).filter(Ruta.id == ruta_id).first()
+    ruta = db.query(Ruta).filter(Ruta.id == ruta_id).with_for_update().first()
     if not ruta:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -657,14 +684,23 @@ def reordenar_paradas(
             detail="Hay paradas repetidas en el nuevo orden"
         )
 
-    # Calcular cómo quedaría el orden de TODAS las paradas y verificar que no se repita
-    nuevo_orden = {str(p.id): p.orden for p in ruta.paradas}
-    for item in datos.paradas:
-        nuevo_orden[str(item.parada_id)] = item.orden
-    if any(o < 1 for o in nuevo_orden.values()) or len(set(nuevo_orden.values())) != len(nuevo_orden):
+    # El nuevo orden tiene que incluir TODAS las paradas de la ruta (una secuencia incompleta
+    # dejaría paradas sin posición definida)
+    if set(ids_enviados) != set(paradas_actuales):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El nuevo orden es inválido: cada parada necesita una posición distinta, empezando en 1"
+            detail=(
+                f"El nuevo orden está incompleto: la ruta tiene {len(paradas_actuales)} paradas "
+                f"y se enviaron {len(ids_enviados)}. Mandá todas las paradas"
+            )
+        )
+
+    # Y las posiciones tienen que ser exactamente 1..N, sin repetir ni saltear
+    posiciones = sorted(i.orden for i in datos.paradas)
+    if posiciones != list(range(1, len(paradas_actuales) + 1)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El nuevo orden es inválido: las posiciones deben ser 1, 2, 3… sin repetir ni saltear ninguna"
         )
 
     # Aplicar el nuevo orden a cada parada

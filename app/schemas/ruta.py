@@ -4,6 +4,7 @@ from typing import Optional, List
 from datetime import datetime, date
 from enum import Enum
 import uuid
+from app.core.geo import coordenadas_validas
 
 class EstadoRuta(str, Enum):
     pendiente = "pendiente"
@@ -92,8 +93,8 @@ class RutaCreate(BaseModel):
     nombre: str
     entregas_ids: List[uuid.UUID]
     origen_descripcion: Optional[str] = None
-    origen_latitud: Optional[float] = None
-    origen_longitud: Optional[float] = None
+    origen_latitud: Optional[float] = Field(None, ge=-90, le=90)
+    origen_longitud: Optional[float] = Field(None, ge=-180, le=180)
     guardar_plantilla: bool = False
     # Sprint 3 — fecha operativa para la que se planifica la ruta
     fecha_programada: Optional[date] = None
@@ -121,6 +122,8 @@ class RutaCreate(BaseModel):
 
     @model_validator(mode="after")
     def _validar_retorno(self):
+        coordenadas_validas(self.origen_latitud, self.origen_longitud)
+        coordenadas_validas(self.retorno_latitud, self.retorno_longitud)
         if self.retorno_tipo == RetornoTipo.otro:
             tiene_coords = self.retorno_latitud is not None and self.retorno_longitud is not None
             if (self.retorno_latitud is None) != (self.retorno_longitud is None):
@@ -250,8 +253,13 @@ class UbicacionRequest(BaseModel):
     Body para PATCH /rutas/{id}/ubicacion.
     El chofer reporta su posición GPS cada 15 segundos desde el front.
     """
-    latitud: float
-    longitud: float
+    latitud: float = Field(..., ge=-90, le=90)
+    longitud: float = Field(..., ge=-180, le=180)
+
+    @model_validator(mode="after")
+    def _no_nulas(self):
+        coordenadas_validas(self.latitud, self.longitud)
+        return self
 
 class SeguimientoParadaResponse(BaseModel):
     """Datos mínimos de una parada para la vista pública de seguimiento."""
@@ -331,8 +339,7 @@ class ParadaExtraCreate(BaseModel):
 
     @model_validator(mode="after")
     def _coordenadas_juntas(self):
-        if (self.latitud is None) != (self.longitud is None):
-            raise ValueError("Mandá latitud y longitud juntas, o ninguna de las dos")
+        coordenadas_validas(self.latitud, self.longitud)
         return self
 
 
