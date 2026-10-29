@@ -2,6 +2,7 @@
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from app.core.config import settings
 from app.db.database import get_db
 from app.db.database import Base, engine
 from app.api.routes import auth, clientes, entregas, rutas, usuarios, seguimiento, vehiculos, puntos_salida
@@ -27,12 +28,13 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configuración de CORS — permite que el front (React en localhost:3000)
-# pueda hacer requests al back (FastAPI en localhost:8000)
+# Configuración de CORS — permite que el front pueda hacer requests al back.
+# Los orígenes salen de la variable CORS_ORIGINS (ver .env), así el mismo código
+# sirve en local y en producción sin tocar el código.
 # Sin esto el navegador bloquea todas las requests por seguridad
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # URL del front en desarrollo
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],   # Permite GET, POST, PUT, PATCH, DELETE
     allow_headers=["*"],   # Permite todos los headers incluyendo Authorization

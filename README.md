@@ -51,6 +51,10 @@ ACCESS_TOKEN_EXPIRE_MINUTES=1440
 
 ORS_API_KEY=tu_api_key_de_openrouteservice
 
+CORS_ORIGINS=https://tu-front.vercel.app
+
+`CORS_ORIGINS` (opcional) son los orígenes del front permitidos por CORS, separados por coma y sin barra final. Si no se define, se permiten `http://localhost:3000` y `http://localhost:5173` (desarrollo). En producción hay que poner la URL pública del front.
+
 ## Base de datos
 
 1. Crear la base de datos en PostgreSQL:
