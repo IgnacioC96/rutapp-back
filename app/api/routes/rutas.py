@@ -12,7 +12,8 @@ from app.schemas.ruta import (
     RutaResponse, RutaListResponse,
     ConfirmarEntregaRequest, NotaParadaRequest, NoEntregadaRequest, UbicacionRequest, SeguimientoResponse,
     SeguimientoParadaResponse, ReordenarParadasRequest, ParadaExtraCreate,
-    ParadaExtraUpdate, RetornoTipo, fase_ruta, entregas_pendientes
+    ParadaExtraUpdate, RetornoTipo, fase_ruta, entregas_pendientes,
+    EstadoRuta as EstadoRutaSchema
 )
 from app.core.security import require_admin, get_current_user
 from app.services.optimizacion import geocodificar_direccion, optimizar_ruta, ServicioMapasError
@@ -94,6 +95,10 @@ def listar_rutas(
     chofer_id: Optional[uuid.UUID] = Query(None),
     solo_plantillas: Optional[bool] = Query(None),
     fecha_programada: Optional[date] = Query(None),
+    # Historial: filtrar por estado y por rango de fechas programadas
+    estado: Optional[EstadoRutaSchema] = Query(None),
+    fecha_desde: Optional[date] = Query(None),
+    fecha_hasta: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
@@ -101,8 +106,15 @@ def listar_rutas(
     Lista rutas según el rol del usuario y filtros opcionales.
     - Admin: ve todas las rutas
     - Chofer: ve solo las rutas asignadas a él
-    Filtros opcionales: chofer_id, solo_plantillas, fecha_programada
+    Filtros opcionales: chofer_id, solo_plantillas, fecha_programada, estado,
+    fecha_desde / fecha_hasta (rango sobre la fecha programada, inclusivo).
+    Cada ruta trae sus paradas con el teléfono del cliente, así sirve como historial.
     """
+    if fecha_desde and fecha_hasta and fecha_desde > fecha_hasta:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="fecha_desde no puede ser mayor que fecha_hasta"
+        )
     query = db.query(Ruta)
 
     # Filtrar plantillas o rutas operativas según el parámetro
@@ -121,6 +133,12 @@ def listar_rutas(
     # Filtrar por fecha operativa
     if fecha_programada:
         query = query.filter(Ruta.fecha_programada == fecha_programada)
+    if fecha_desde:
+        query = query.filter(Ruta.fecha_programada >= fecha_desde)
+    if fecha_hasta:
+        query = query.filter(Ruta.fecha_programada <= fecha_hasta)
+    if estado:
+        query = query.filter(Ruta.estado == EstadoRuta(estado.value))
 
     rutas = query.order_by(Ruta.creada_en.desc()).all()
 

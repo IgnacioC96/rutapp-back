@@ -25,6 +25,8 @@ class ParadaResponse(BaseModel):
     orden: int
     entrega_id: Optional[uuid.UUID] = None
     cliente: Optional[str] = None
+    # Teléfono (WhatsApp) del cliente: el administrador y el chofer asignado lo ven para contactarlo
+    cliente_telefono: Optional[str] = None
     direccion: Optional[str] = None
     tiempo_desde_anterior_min: Optional[int] = None
     distancia_desde_anterior_km: Optional[float] = None
@@ -73,6 +75,7 @@ class ParadaResponse(BaseModel):
             orden=parada.orden,
             entrega_id=parada.entrega_id,
             cliente=parada.entrega.cliente.nombre if parada.entrega else None,
+            cliente_telefono=parada.entrega.cliente.telefono_whatsapp if parada.entrega and parada.entrega.cliente else None,
             direccion=parada.entrega.direccion.descripcion if parada.entrega else None,
             tiempo_desde_anterior_min=parada.tiempo_desde_anterior_min,
             distancia_desde_anterior_km=parada.distancia_desde_anterior_km,
@@ -200,6 +203,10 @@ class RutaResponse(BaseModel):
     creada_en: datetime
     iniciada_en: Optional[datetime] = None
     finalizada_en: Optional[datetime] = None
+    # Resumen para el historial: paradas de entrega (sin contar las extra)
+    paradas_total: int = 0
+    paradas_completadas: int = 0
+    paradas_omitidas: int = 0
     paradas: List[ParadaResponse] = []
 
     class Config:
@@ -237,6 +244,9 @@ class RutaResponse(BaseModel):
             creada_en=ruta.creada_en,
             iniciada_en=ruta.iniciada_en,
             finalizada_en=ruta.finalizada_en,
+            paradas_total=sum(1 for p in ruta.paradas if not p.es_parada_extra),
+            paradas_completadas=sum(1 for p in ruta.paradas if not p.es_parada_extra and p.completada),
+            paradas_omitidas=sum(1 for p in ruta.paradas if not p.es_parada_extra and p.omitida),
             paradas=[ParadaResponse.from_parada(p) for p in ruta.paradas]
         )
 
