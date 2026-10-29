@@ -38,6 +38,7 @@ class EntregaResponse(BaseModel):
     id: uuid.UUID
     cliente_id: uuid.UUID
     cliente_nombre: Optional[str] = None
+    cliente_telefono: Optional[str] = None
     direccion_id: uuid.UUID
     direccion_descripcion: Optional[str] = None
     ruta_id: Optional[uuid.UUID] = None
@@ -65,6 +66,7 @@ class EntregaResponse(BaseModel):
             id=entrega.id,
             cliente_id=entrega.cliente_id,
             cliente_nombre=entrega.cliente.nombre if entrega.cliente else None,
+            cliente_telefono=entrega.cliente.telefono_whatsapp if entrega.cliente else None,
             direccion_id=entrega.direccion_id,
             direccion_descripcion=entrega.direccion.descripcion if entrega.direccion else None,
             ruta_id=entrega.ruta_id,
