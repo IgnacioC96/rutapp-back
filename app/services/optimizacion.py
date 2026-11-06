@@ -38,13 +38,13 @@ async def geocodificar_direccion(direccion: str) -> tuple[float, float] | None:
     except ValueError as exc:
         raise ServicioMapasError("geocodificación devolvió una respuesta ilegible") from exc
 
-        # La API devuelve una lista de features GeoJSON
-        if not data.get("features"):
-            return None
+    # La API devuelve una lista de features GeoJSON
+    if not data.get("features"):
+        return None
 
-        # Las coordenadas vienen en formato [longitud, latitud]
-        coords = data["features"][0]["geometry"]["coordinates"]
-        return coords[0], coords[1]  # (longitud, latitud)
+    # Las coordenadas vienen en formato [longitud, latitud]
+    coords = data["features"][0]["geometry"]["coordinates"]
+    return coords[0], coords[1]  # (longitud, latitud)
 
 
 async def calcular_matriz_distancias(coordenadas: list[tuple[float, float]]) -> list[list[float]]:
