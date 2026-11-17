@@ -39,6 +39,11 @@ class Cliente(Base):
     )
     entregas = relationship("Entrega", back_populates="cliente")
 
+    @property
+    def total_entregas(self) -> int:
+        """Cantidad de entregas del cliente (se informa en los listados y el detalle)."""
+        return len(self.entregas)
+
 
 class DireccionCliente(Base):
     """

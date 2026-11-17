@@ -30,7 +30,7 @@ def listar_clientes(
 ):
     """
     Lista todos los clientes con filtros opcionales.
-    - search: busca por nombre o teléfono
+    - search: busca por nombre, teléfono o dirección
     - solo_activos: si es True solo devuelve clientes activos
     - Soporta paginación
     """
@@ -40,9 +40,11 @@ def listar_clientes(
         query = query.filter(Cliente.activo == True)
 
     if search:
+        patron = f"%{search}%"
         query = query.filter(
-            Cliente.nombre.ilike(f"%{search}%") |
-            Cliente.telefono_whatsapp.ilike(f"%{search}%")
+            Cliente.nombre.ilike(patron) |
+            Cliente.telefono_whatsapp.ilike(patron) |
+            Cliente.direcciones.any(DireccionCliente.descripcion.ilike(patron))
         )
 
     total = query.count()

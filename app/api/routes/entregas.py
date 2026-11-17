@@ -95,8 +95,10 @@ def listar_entregas(
         query = query.filter(Entrega.cliente_id == cliente_id)
 
     if search:
+        patron = f"%{search}%"
         query = query.join(Cliente).filter(
-            Cliente.nombre.ilike(f"%{search}%")
+            Cliente.nombre.ilike(patron) |
+            Entrega.descripcion.ilike(patron)
         )
 
     total = query.count()

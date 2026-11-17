@@ -150,6 +150,8 @@ class ClienteResponse(BaseModel):
     cuit: Optional[str] = None
     notas: Optional[str] = None
     activo: bool
+    # Cantidad de entregas que tiene el cliente (el front la muestra en la lista y el detalle)
+    total_entregas: int = 0
     direcciones: List[DireccionResponse] = []
 
     class Config:
