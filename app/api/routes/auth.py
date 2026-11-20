@@ -1,5 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from typing import Optional
 from sqlalchemy.orm import Session
 from app.db.database import get_db
@@ -16,6 +16,7 @@ from app.core.security import (
 import uuid
 from datetime import timedelta
 from app.core.config import settings
+from app.services import metricas
 
 # El router agrupa todos los endpoints de auth bajo el mismo prefijo
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -28,7 +29,7 @@ def _admins_activos(db: Session) -> int:
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(request: LoginRequest, db: Session = Depends(get_db)):
+def login(request: LoginRequest, req: Request, db: Session = Depends(get_db)):
     """
     Autentica a un usuario y devuelve un token JWT.
     Verifica email, contraseña y rol.
@@ -61,12 +62,18 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
 
     # Crear el token JWT con los datos del usuario
     # Estos datos van a estar disponibles en cada request protegido
-    token = crear_token(data={
+    # Métricas: se abre una sesión y su id viaja en el token ("sid"), para poder medir
+    # duración de sesión y asociar cada acción a la sesión en la que ocurrió.
+    sesion_id = metricas.iniciar_sesion(db, usuario.id, usuario.rol.value, req.headers.get("user-agent"))
+    datos_token = {
         "sub": str(usuario.id),   # subject: el ID del usuario
         "email": usuario.email,
         "rol": usuario.rol.value,
         "nombre": usuario.nombre
-    }, expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    }
+    if sesion_id:
+        datos_token["sid"] = str(sesion_id)
+    token = crear_token(data=datos_token, expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
 
     return TokenResponse(
         access_token=token,
