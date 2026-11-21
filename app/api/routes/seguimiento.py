@@ -35,6 +35,8 @@ def seguimiento_publico(
     total_paradas = len(paradas_entrega)
     # Una parada "no entregada" también está resuelta: el chofer ya siguió de largo
     paradas_completadas = sum(1 for p in paradas_entrega if p.completada or p.omitida)
+    entregadas = sum(1 for p in paradas_entrega if p.completada)
+    no_entregadas = sum(1 for p in paradas_entrega if p.omitida and not p.completada)
     progreso = int((paradas_completadas / total_paradas) * 100) if total_paradas > 0 else 0
 
     # Determinar la próxima parada (la primera no completada en orden)
@@ -59,6 +61,9 @@ def seguimiento_publico(
         estado=ruta.estado,
         chofer_nombre=chofer_nombre,
         progreso=progreso,
+        paradas_total=total_paradas,
+        paradas_entregadas=entregadas,
+        paradas_no_entregadas=no_entregadas,
         proxima_parada=proxima_parada,
         ultima_actualizacion=datetime.now(timezone(timedelta(hours=-3))),
         # Coordenadas actuales del chofer guardadas por PATCH /ubicacion

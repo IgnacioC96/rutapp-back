@@ -337,6 +337,10 @@ class SeguimientoResponse(BaseModel):
     chofer_nombre: str
     # Porcentaje de paradas completadas (0-100)
     progreso: int
+    # Desglose de las paradas de entrega: el progreso cuenta resueltas (entregadas + no entregadas)
+    paradas_total: int = 0
+    paradas_entregadas: int = 0
+    paradas_no_entregadas: int = 0
     proxima_parada: Optional[SeguimientoParadaResponse] = None
     ultima_actualizacion: Optional[datetime] = None
     # Ubicación actual del chofer — se actualiza cada 15 segundos
