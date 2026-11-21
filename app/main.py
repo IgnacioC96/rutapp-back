@@ -5,13 +5,14 @@ from sqlalchemy import text
 from app.core.config import settings
 from app.db.database import get_db
 from app.db.database import Base, engine
-from app.api.routes import auth, clientes, entregas, rutas, usuarios, seguimiento, vehiculos, puntos_salida
+from app.api.routes import auth, clientes, entregas, rutas, usuarios, seguimiento, vehiculos, puntos_salida, metricas as metricas_routes
 # Importar todos los modelos para que SQLAlchemy los registre
-from app.models import usuario, cliente, entrega, ruta, vehiculo, punto_salida
+from app.models import usuario, cliente, entrega, ruta, vehiculo, punto_salida, metricas as metricas_models  # noqa: F401
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import http_exception_handler as _default_http_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy.exc import IntegrityError
+from app.core.metricas_middleware import registrar_actividad
 from app.core.exceptions import (
     validation_exception_handler,
     integrity_error_handler,
@@ -40,6 +41,9 @@ app.add_middleware(
     allow_headers=["*"],   # Permite todos los headers incluyendo Authorization
 )
 
+# Métricas de uso: registra operaciones, ingresos rechazados y visitas públicas (ver core/metricas_middleware.py)
+app.middleware("http")(registrar_actividad)
+
 # Registro de exception handlers globales
 # Interceptan errores antes de que lleguen al cliente y los loguean
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
@@ -56,6 +60,7 @@ app.include_router(usuarios.router,  prefix="/api/v1", tags=["Usuarios"])
 app.include_router(seguimiento.router, prefix="/api/v1", tags=["Seguimiento"])
 app.include_router(vehiculos.router, prefix="/api/v1", tags=["Flota"])
 app.include_router(puntos_salida.router, prefix="/api/v1", tags=["Puntos de salida"])
+app.include_router(metricas_routes.router, prefix="/api/v1", tags=["Métricas"])
 
 @app.get("/")
 def root():

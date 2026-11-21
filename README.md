@@ -118,6 +118,20 @@ Content-Type: application/json
 
 Este endpoint se desactiva automáticamente una vez creado el primer usuario.
 
+## Métricas de uso
+
+El sistema registra cómo se usa (sesiones, acciones y pantallas visitadas) para analizar el comportamiento de los usuarios.
+Tablas: `sesiones_usuario`, `eventos_usuario` y `navegacion` (migración `e5a2c9d1b7f3`: correr `alembic upgrade head`).
+
+- **Captura automática:** un middleware (`app/core/metricas_middleware.py`) registra cada operación que modifica datos
+  (crear, editar, eliminar, confirmar entrega...), los ingresos rechazados, las visitas al seguimiento público y cuánto tardó
+  la API en responder. El login abre una sesión (su id viaja en el token como `sid`). Si la analítica falla, la app sigue funcionando.
+- **Navegación:** el front avisa cada pantalla con `POST /api/v1/metricas/navegacion` y el cierre de sesión con `POST /api/v1/metricas/sesion/cerrar`.
+- **Tablero:** `GET /api/v1/metricas/dashboard?desde=AAAA-MM-DD&hasta=AAAA-MM-DD` (solo admin). El front lo muestra en `/admin/metricas`.
+- **Privacidad:** no se guardan contraseñas, emails de intentos fallidos ni los textos buscados.
+- **Datos de prueba:** `python scripts/simular_metricas.py` genera 30 días de actividad simulada (marcada como `simulado`);
+  `python scripts/simular_metricas.py --limpiar` la borra. Las consultas de análisis están en `scripts/consultas_metricas.sql`.
+
 ## Endpoints principales
 
 | Módulo | Prefijo | Descripción |
@@ -126,6 +140,7 @@ Este endpoint se desactiva automáticamente una vez creado el primer usuario.
 | Clientes | `/api/v1/clientes` | ABM de clientes con múltiples direcciones |
 | Entregas | `/api/v1/entregas` | ABM de entregas con estados |
 | Rutas | `/api/v1/rutas` | Crear, optimizar y ejecutar rutas |
+| Métricas | `/api/v1/metricas` | Navegación, cierre de sesión y tablero de análisis (admin) |
 
 ## Estructura del proyecto
 
