@@ -59,3 +59,15 @@ def test_filtrar_por_rango_de_fechas(client, fab):
     assert ids(fecha_desde="2026-10-01", fecha_hasta="2026-11-10") == {a["id"], b["id"]}
     r = client.get(f"{API}/rutas", headers=fab.h, params={"fecha_desde": "2026-12-01", "fecha_hasta": "2026-11-01"})
     assert r.status_code == 400
+
+
+def test_el_seguimiento_publico_separa_entregadas_de_no_entregadas(client, fab, chofer_a):
+    """H01 del informe QA: resolver todas las paradas no equivale a entregarlas todas."""
+    ruta = fab.ruta_en_curso(chofer_a, cantidad=2)
+    p1, p2 = ruta["paradas"]
+    client.patch(f"{API}/rutas/{ruta['id']}/entregas/{p1['entrega_id']}/confirmar", headers=chofer_a["headers"],
+                 json={"codigo": _codigo(client, fab.h, p1["entrega_id"])})
+    client.patch(f"{API}/rutas/{ruta['id']}/entregas/{p2['entrega_id']}/no-entregada", headers=chofer_a["headers"], json={})
+    pub = client.get(f"{API}/seguimiento/{ruta['codigo_seguimiento']}").json()
+    assert pub["progreso"] == 100
+    assert (pub["paradas_total"], pub["paradas_entregadas"], pub["paradas_no_entregadas"]) == (2, 1, 1)
